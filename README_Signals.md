@@ -182,6 +182,24 @@ is ready to produce a real verdict the moment a paid key (or deeper history)
 is supplied. Insider and congressional-trade signals are stubbed for the same
 reason: real, plausibly-differentiated, but gated behind a paid plan here.
 
+### Differentiated-data providers: all gated behind paid keys
+
+Surveying alternatives (per the FMP-alternatives list and the live data MCPs
+available here) for a *free, history-bearing, differentiated* feed came up empty:
+
+| Source | Differentiated data | Status here |
+|--------|--------------------|-------------|
+| FMP free | analyst rating counts | ~10 monthly snapshots only; insider/congress/news paid |
+| LunarCrush | social-sentiment **time series** | paid — no active subscription, time series locked |
+| EODHD / FinancialData.Net | sentiment, insider, deep history | need an API key (not configured) |
+| Alpha Vantage | NEWS_SENTIMENT, fundamentals | needs key; free tier 25 req/day |
+
+So the harness is now **provider-agnostic**: `evaluate_signal_orthogonality`
+takes `{symbol: dated_signal_series}` from *any* source and runs the same
+IC-vs-technical / combined-IC / correlation test. The moment a key for any
+provider above is supplied, wiring a fetcher + one signal series produces a real
+verdict — no changes to the test harness needed.
+
 ### Conclusion after three iterations
 
 Rigorous, repeatable testing finds **no simple price-only signal that beats

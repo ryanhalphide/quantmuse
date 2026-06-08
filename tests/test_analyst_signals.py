@@ -8,6 +8,7 @@ from data_service.signals.analyst_signals import (
     consensus_score,
     revision_signal,
     evaluate_orthogonality,
+    evaluate_signal_orthogonality,
 )
 from data_service.fetchers.fmp_fetcher import FMPFetcher
 
@@ -81,6 +82,27 @@ class TestOrthogonality(unittest.TestCase):
         self.assertGreaterEqual(res["n"], 50)
         self.assertIn("signal_correlation", res)
         self.assertIsNotNone(res["ic_technical"])
+
+
+class TestGenericOrthogonality(unittest.TestCase):
+    def test_recovers_known_signal_with_arbitrary_series(self):
+        # A provider-agnostic signal that *is* next-month return should show a
+        # strongly positive IC -- validates the generic pooling/alignment path.
+        rng = np.random.RandomState(2)
+        price_data, signal_data = {}, {}
+        months = pd.date_range("2018-01-01", periods=60, freq="MS")
+        for i in range(10):
+            daily = pd.date_range("2018-01-01", periods=60 * 22, freq="D")
+            closes = 100 + np.cumsum(rng.randn(len(daily)))
+            df = pd.DataFrame({"close": closes}, index=daily)
+            price_data[f"S{i}"] = df
+            close_m = df["close"].resample("MS").first()
+            fwd = close_m.shift(-1) / close_m - 1.0
+            signal_data[f"S{i}"] = fwd.reindex(months).fillna(0.0)  # "leaks" fwd ret
+        res = evaluate_signal_orthogonality(price_data, signal_data, min_n=50)
+        self.assertGreaterEqual(res["n"], 50)
+        self.assertIn("ic_signal", res)
+        self.assertGreater(res["ic_signal"], 0.5)  # signal == fwd ret -> high IC
 
 
 class TestFMPFetcher(unittest.TestCase):

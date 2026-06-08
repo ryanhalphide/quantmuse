@@ -35,11 +35,13 @@ try:
         consensus_score,
         revision_signal,
         evaluate_orthogonality,
+        evaluate_signal_orthogonality,
     )
 except ImportError:
     consensus_score = None
     revision_signal = None
     evaluate_orthogonality = None
+    evaluate_signal_orthogonality = None
 
 __all__ = [
     "SignalProvider",
@@ -56,4 +58,5 @@ __all__ = [
     "consensus_score",
     "revision_signal",
     "evaluate_orthogonality",
+    "evaluate_signal_orthogonality",
 ]

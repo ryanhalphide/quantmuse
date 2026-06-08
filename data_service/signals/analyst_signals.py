@@ -57,6 +57,66 @@ def _rank_ic(signal: pd.Series, fwd_ret: pd.Series, min_n: int = 50) -> Optional
     return float(ic) if pd.notna(ic) else None
 
 
+def evaluate_signal_orthogonality(
+    price_data: Dict[str, pd.DataFrame],
+    signal_data: Dict[str, pd.Series],
+    close_col: str = "close",
+    min_n: int = 50,
+    resample: str = "MS",
+) -> Dict[str, Any]:
+    """Does an arbitrary differentiated signal add value over the technical one?
+
+    Provider-agnostic: ``signal_data`` maps symbol -> a dated signal Series (any
+    frequency; resampled to ``resample`` buckets). This lets *any* alternative
+    data source (analyst ratings, news/social sentiment, insider flow, ...) be
+    tested with one call -- supply a signal series per symbol and it is pooled
+    into per-bucket observations of (signal, technical_signal, next-bucket
+    return), with no lookahead.
+
+    Returns IC of the signal, the technical signal, and the two combined, plus
+    their correlation. Low correlation + combined IC above each standalone IC
+    indicates orthogonal, additive value.
+    """
+    records = []
+    for sym, sig in signal_data.items():
+        price_df = price_data.get(sym)
+        if price_df is None or price_df.empty or sig is None or len(sig.dropna()) == 0:
+            continue
+
+        sig_b = sig.dropna().resample(resample).last()
+        tech_daily = compute_technical_signal_series(price_df, close_col=close_col)["score"]
+        tech_b = tech_daily.resample(resample).last()
+        close_b = price_df[close_col].astype(float).resample(resample).first()
+        fwd_ret = close_b.shift(-1) / close_b - 1.0
+
+        for ts in sig_b.index:
+            if ts in tech_b.index and ts in fwd_ret.index:
+                a, t, r = sig_b.loc[ts], tech_b.loc[ts], fwd_ret.loc[ts]
+                if pd.notna(a) and pd.notna(t) and pd.notna(r):
+                    records.append((float(a), float(t), float(r)))
+
+    n = len(records)
+    if n < min_n:
+        return {"n": n, "ic_signal": None, "ic_technical": None,
+                "ic_combined": None, "signal_correlation": None,
+                "note": f"underpowered: only {n} pooled observations (need >= {min_n}). "
+                        "Supply deeper history (a paid data key) to validate."}
+
+    panel = pd.DataFrame(records, columns=["signal", "technical", "fwd"])
+
+    def z(s: pd.Series) -> pd.Series:
+        return (s - s.mean()) / s.std() if s.std() > 0 else s * 0.0
+
+    combined = z(panel["signal"]) + z(panel["technical"])
+    return {
+        "n": n,
+        "ic_signal": _rank_ic(panel["signal"], panel["fwd"], min_n),
+        "ic_technical": _rank_ic(panel["technical"], panel["fwd"], min_n),
+        "ic_combined": _rank_ic(combined, panel["fwd"], min_n),
+        "signal_correlation": float(panel["signal"].corr(panel["technical"])),
+    }
+
+
 def evaluate_orthogonality(
     price_data: Dict[str, pd.DataFrame],
     analyst_data: Dict[str, pd.DataFrame],
@@ -64,63 +124,18 @@ def evaluate_orthogonality(
     close_col: str = "close",
     min_n: int = 50,
 ) -> Dict[str, Any]:
-    """Does the analyst signal add predictive value over the technical signal?
+    """Analyst-rating wrapper around :func:`evaluate_signal_orthogonality`.
 
-    Pools all symbols into monthly observations of (analyst_signal,
-    technical_signal, next-month return) and computes the IC of each signal
-    alone, the combined (equal-weight z-blend) IC, and the correlation between
-    the two signals. Low signal correlation + a combined IC above each
-    standalone IC indicates orthogonal, additive value.
-
-    Monthly alignment uses month-start snapshots and the next month's return,
-    so there is no lookahead.
+    Converts each symbol's grade history into a signal series (revision by
+    default, else consensus level), then runs the generic orthogonality test.
     """
-    records = []
-    for sym, grades in analyst_data.items():
-        price_df = price_data.get(sym)
-        if price_df is None or price_df.empty or grades is None or grades.empty:
-            continue
-
-        analyst = revision_signal(grades) if use_revision else consensus_score(grades)
-        analyst = analyst.dropna()
-        if analyst.empty:
-            continue
-
-        # Technical signal resampled to month start (last obs of each month).
-        tech_daily = compute_technical_signal_series(price_df, close_col=close_col)["score"]
-        tech_monthly = tech_daily.resample("MS").last()
-
-        # Next-month return from month-start close.
-        monthly_close = price_df[close_col].astype(float).resample("MS").first()
-        fwd_ret = monthly_close.shift(-1) / monthly_close - 1.0
-
-        idx = analyst.index.normalize()
-        analyst.index = idx
-        for ts in idx:
-            if ts in tech_monthly.index and ts in fwd_ret.index:
-                a, t, r = analyst.loc[ts], tech_monthly.loc[ts], fwd_ret.loc[ts]
-                if pd.notna(a) and pd.notna(t) and pd.notna(r):
-                    records.append((float(a), float(t), float(r)))
-
-    n = len(records)
-    if n < min_n:
-        return {"n": n, "ic_analyst": None, "ic_technical": None,
-                "ic_combined": None, "signal_correlation": None,
-                "note": f"underpowered: only {n} pooled observations (need >= {min_n}). "
-                        "Free-tier analyst history is too shallow; use a paid key "
-                        "or deeper history to validate."}
-
-    panel = pd.DataFrame(records, columns=["analyst", "technical", "fwd"])
-
-    def z(s: pd.Series) -> pd.Series:
-        return (s - s.mean()) / s.std() if s.std() > 0 else s * 0.0
-
-    combined = z(panel["analyst"]) + z(panel["technical"])
-    return {
-        "n": n,
-        "ic_analyst": _rank_ic(panel["analyst"], panel["fwd"], min_n),
-        "ic_technical": _rank_ic(panel["technical"], panel["fwd"], min_n),
-        "ic_combined": _rank_ic(combined, panel["fwd"], min_n),
-        "signal_correlation": float(panel["analyst"].corr(panel["technical"])),
-        "use_revision": use_revision,
+    signal_data = {
+        sym: (revision_signal(g) if use_revision else consensus_score(g))
+        for sym, g in analyst_data.items()
     }
+    res = evaluate_signal_orthogonality(
+        price_data, signal_data, close_col=close_col, min_n=min_n
+    )
+    res["ic_analyst"] = res.pop("ic_signal")  # name it for the analyst context
+    res["use_revision"] = use_revision
+    return res
