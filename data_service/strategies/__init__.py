@@ -40,3 +40,64 @@ __all__ = [
     'ArbOpportunity',
     'KalshiArbitrageTrader',
 ]
+
+try:
+    from .trend_following import (
+        TSMOMConfig,
+        compute_forecast_series,
+        realized_vol,
+        build_weights,
+        tsmom_backtest,
+        run_both_directions,
+        live_target_weights,
+    )
+except ImportError:
+    TSMOMConfig = None
+    compute_forecast_series = None
+    realized_vol = None
+    build_weights = None
+    tsmom_backtest = None
+    run_both_directions = None
+    live_target_weights = None
+
+try:
+    from .trend_following_data import load_universe, align_calendar, ETF_UNIVERSE, CRYPTO_UNIVERSE
+except ImportError:
+    load_universe = None
+    align_calendar = None
+    ETF_UNIVERSE = None
+    CRYPTO_UNIVERSE = None
+
+try:
+    from .trend_following_robustness import (
+        walk_forward,
+        parameter_sensitivity,
+        per_asset_contribution,
+        correlation_to_benchmark,
+        core_plus_trend,
+    )
+except ImportError:
+    walk_forward = None
+    parameter_sensitivity = None
+    per_asset_contribution = None
+    correlation_to_benchmark = None
+    core_plus_trend = None
+
+__all__ += [
+    'TSMOMConfig',
+    'compute_forecast_series',
+    'realized_vol',
+    'build_weights',
+    'tsmom_backtest',
+    'run_both_directions',
+    'live_target_weights',
+    'load_universe',
+    'align_calendar',
+    'ETF_UNIVERSE',
+    'CRYPTO_UNIVERSE',
+    'walk_forward',
+    'parameter_sensitivity',
+    'per_asset_contribution',
+    'correlation_to_benchmark',
+    'core_plus_trend',
+]
