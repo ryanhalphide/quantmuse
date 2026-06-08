@@ -58,6 +58,11 @@ setup(
             'uvicorn[standard]',
             'jinja2',
             'aiofiles'
+        ],
+        'kalshi': [
+            'requests',
+            'pandas',
+            'cryptography>=41.0.0'  # required to sign authenticated trading requests
         ]
     }
 ) 

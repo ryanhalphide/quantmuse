@@ -9,4 +9,14 @@ try:
 except ImportError:
     AlphaVantageFetcher = None
 
-__all__ = ['BinanceFetcher', 'AlphaVantageFetcher'] 
+try:
+    from .yahoo_fetcher import YahooFetcher
+except ImportError:
+    YahooFetcher = None
+
+try:
+    from .kalshi_fetcher import KalshiFetcher
+except ImportError:
+    KalshiFetcher = None
+
+__all__ = ['BinanceFetcher', 'AlphaVantageFetcher', 'YahooFetcher', 'KalshiFetcher']

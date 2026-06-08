@@ -1,11 +1,12 @@
 # Core modules
 try:
-    from .fetchers import AlphaVantageFetcher, YahooFetcher, BinanceFetcher
+    from .fetchers import AlphaVantageFetcher, YahooFetcher, BinanceFetcher, KalshiFetcher
 except ImportError:
     # Handle missing dependencies gracefully
     AlphaVantageFetcher = None
     YahooFetcher = None
     BinanceFetcher = None
+    KalshiFetcher = None
 
 try:
     from .processors import DataProcessor
@@ -59,9 +60,10 @@ __version__ = "0.1.0"
 __all__ = [
     # Data fetchers
     'AlphaVantageFetcher',
-    'YahooFetcher', 
+    'YahooFetcher',
     'BinanceFetcher',
-    
+    'KalshiFetcher',
+
     # Data processors
     'DataProcessor',
     
