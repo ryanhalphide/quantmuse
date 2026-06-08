@@ -24,4 +24,9 @@ try:
 except ImportError:
     FMPFetcher = None
 
-__all__ = ['BinanceFetcher', 'AlphaVantageFetcher', 'YahooFetcher', 'KalshiFetcher', 'FMPFetcher']
+try:
+    from .eodhd_fetcher import EODHDFetcher
+except ImportError:
+    EODHDFetcher = None
+
+__all__ = ['BinanceFetcher', 'AlphaVantageFetcher', 'YahooFetcher', 'KalshiFetcher', 'FMPFetcher', 'EODHDFetcher']
