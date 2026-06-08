@@ -145,6 +145,30 @@ Always run `cross_sectional_ls` and compare to the hold-basket benchmark before
 believing a signal makes money. This is why the module ships the benchmark in
 the same call.
 
+### Iteration 2: mean-reversion long/flat on the strongest names
+
+The IC sweep showed the signal is strongest and most stable on indices, so we
+built a mark-to-market long/flat mean-reversion backtest (`long_flat_backtest`,
+with real Sharpe / max-drawdown, unlike the avg-cost BacktestEngine) and tested
+it where the signal looked best:
+
+| Asset | Best strategy | Buy & hold | Read |
+|-------|---------------|-----------|------|
+| SPY (15y) | ann +6.4%, **Sharpe 0.66**, maxDD −17% (14% time in market) | ann +14.5%, **Sharpe 0.87**, maxDD −34% | B&H wins risk-adjusted |
+| QQQ (15y) | ann +9.3%, **Sharpe 0.72**, maxDD −20% (24% time in market) | ann +19.7%, **Sharpe 0.97**, maxDD −35% | B&H wins risk-adjusted |
+
+The smaller drawdowns come only from sitting in cash most of the time, not from
+skill — on Sharpe (which controls for that) the signal **loses to buy-and-hold**
+even on its best assets.
+
+### Conclusion after two iterations
+
+Rigorous, repeatable testing finds **no simple technical signal that beats
+buy-and-hold** here — matching the prediction-market research. The deliverable
+is the measurement framework (IC, walk-forward, cross-sectional L/S, risk-adjusted
+long/flat) that makes "does this make money?" answerable in seconds and stops a
+signal from looking good in isolation.
+
 ## Testing
 
 ```bash

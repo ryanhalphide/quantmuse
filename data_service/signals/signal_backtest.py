@@ -176,3 +176,73 @@ def make_signal_strategy(
                 engine.place_order(symbol, "sell", holding.quantity, price, ts)
 
     return strategy
+
+
+def long_flat_backtest(
+    price_df: pd.DataFrame,
+    entry: float = 0.3,
+    exit: float = 0.0,
+    cost_bps: float = 5.0,
+    close_col: str = "close",
+    signal_col: str = "score",
+    weights: Optional[Dict[str, float]] = None,
+) -> Dict[str, Any]:
+    """Mark-to-market long/flat mean-reversion backtest with risk metrics.
+
+    Goes long when the (mean-reversion) signal rises to ``entry`` (oversold) and
+    returns to flat when it falls back to ``exit``. Positions act on the *next*
+    bar (no lookahead). Returns are marked to market daily -- unlike the repo's
+    BacktestEngine, which marks at average cost -- so Sharpe and max drawdown are
+    meaningful. Reports the buy-and-hold benchmark over the same period.
+
+    A mean-reversion signal often won't beat buy-and-hold on total return, but it
+    may win on *risk-adjusted* terms (higher Sharpe, smaller drawdown) by sitting
+    out the worst stretches. This function measures exactly that.
+    """
+    sig = compute_technical_signal_series(price_df, close_col=close_col, weights=weights)
+    score = sig[signal_col]
+    close = price_df[close_col].astype(float)
+    ret = close.pct_change().fillna(0.0)
+
+    # Long/flat state machine over the signal.
+    pos = np.zeros(len(score))
+    state = 0.0
+    for i, s in enumerate(score.values):
+        if not np.isnan(s):
+            if state == 0.0 and s >= entry:
+                state = 1.0
+            elif state == 1.0 and s <= exit:
+                state = 0.0
+        pos[i] = state
+    position = pd.Series(pos, index=score.index)
+
+    held = position.shift(1).fillna(0.0)  # act next bar
+    trades = held.diff().abs().fillna(held.abs())
+    cost = trades * (cost_bps / 10_000.0)
+    strat_ret = held * ret - cost
+
+    strat_eq = (1.0 + strat_ret).cumprod()
+    bh_eq = (1.0 + ret).cumprod()
+
+    def _metrics(r: pd.Series, eq: pd.Series) -> Dict[str, float]:
+        n = len(r)
+        ann_return = float(eq.iloc[-1] ** (252.0 / n) - 1.0) if n > 0 and eq.iloc[-1] > 0 else float("nan")
+        vol = float(r.std() * np.sqrt(252))
+        sharpe = float(r.mean() / r.std() * np.sqrt(252)) if r.std() > 0 else float("nan")
+        peak = eq.cummax()
+        max_dd = float((eq / peak - 1.0).min())
+        return {"ann_return": ann_return, "ann_vol": vol, "sharpe": sharpe, "max_drawdown": max_dd}
+
+    strat = _metrics(strat_ret, strat_eq)
+    bench = _metrics(ret, bh_eq)
+    return {
+        "strategy": strat,
+        "benchmark": bench,
+        "time_in_market": float(held.mean()),
+        "n_trades": int(trades[trades > 0].count()),
+        "entry": entry,
+        "exit": exit,
+        "cost_bps": cost_bps,
+        "equity_curve": strat_eq,
+        "benchmark_curve": bh_eq,
+    }

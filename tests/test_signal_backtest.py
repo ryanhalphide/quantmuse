@@ -8,6 +8,7 @@ from data_service.signals.signal_backtest import (
     compute_technical_signal_series,
     evaluate_predictive_value,
     make_signal_strategy,
+    long_flat_backtest,
     _rsi,
 )
 
@@ -106,3 +107,49 @@ class TestSignalStrategyBacktest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLongFlatBacktest(unittest.TestCase):
+    def test_structure_and_bounds(self):
+        rng = np.random.RandomState(5)
+        df = _price_df(list(100 + np.cumsum(rng.randn(400))))
+        r = long_flat_backtest(df, entry=0.3, exit=0.0)
+        for key in ("ann_return", "ann_vol", "sharpe", "max_drawdown"):
+            self.assertIn(key, r["strategy"])
+            self.assertIn(key, r["benchmark"])
+        self.assertGreaterEqual(r["time_in_market"], 0.0)
+        self.assertLessEqual(r["time_in_market"], 1.0)
+        self.assertGreaterEqual(r["n_trades"], 0)
+        self.assertLessEqual(r["strategy"]["max_drawdown"], 0.0)
+
+    def test_no_lookahead_positions(self):
+        # Flat at the start until the first signal can possibly act (shifted).
+        rng = np.random.RandomState(6)
+        df = _price_df(list(100 + np.cumsum(rng.randn(300))))
+        r = long_flat_backtest(df)
+        # Equity starts at ~1.0 (first bar return neutralized by shift).
+        self.assertAlmostEqual(float(r["equity_curve"].iloc[0]), 1.0, places=6)
+
+    def test_position_mechanics_with_controlled_signal(self):
+        # Deterministic test of the entry/exit + next-bar execution logic:
+        # patch the signal so it is bullish for the first half, then flat.
+        from unittest.mock import patch
+        from data_service.signals import signal_backtest as sb
+
+        n = 20
+        closes = [100.0 * (1.01 ** i) for i in range(n)]  # +1%/day
+        df = _price_df(closes)
+        score = pd.Series([1.0] * (n // 2) + [-1.0] * (n // 2), index=df.index)
+
+        def fake(_df, close_col="close", weights=None):
+            return pd.DataFrame({"score": score})
+
+        with patch.object(sb, "compute_technical_signal_series", fake):
+            r = long_flat_backtest(df, entry=0.3, exit=0.0, cost_bps=0.0)
+
+        # Entered early and exited mid-way -> held roughly the first half.
+        self.assertGreater(r["time_in_market"], 0.3)
+        self.assertLess(r["time_in_market"], 0.7)
+        # Held during a steady rise -> strictly positive strategy return.
+        self.assertGreater(r["strategy"]["ann_return"], 0.0)
+        self.assertEqual(r["n_trades"], 2)  # one entry, one exit
