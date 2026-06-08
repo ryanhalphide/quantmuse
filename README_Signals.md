@@ -77,8 +77,46 @@ or `FMPSignalProvider` is a drop-in once you have a paid key.
   wire it directly to live order execution without your own validation and risk
   controls.
 
+## Validating a signal (does it actually predict anything?)
+
+A signal is only worth trading if it predicts forward returns. `signal_backtest`
+connects the signals to the repo's `BacktestEngine` **and** measures predictive
+value directly, which is the honest test (a single equity curve is easy to
+overfit). The technical components (RSI, MACD) are computed locally from price
+history, so this needs no API key and is fully reproducible.
+
+```bash
+pip install yfinance
+python examples/signal_backtest_demo.py AAPL --years 5 --horizon 5
+```
+
+It reports:
+- **Information Coefficient (IC)** — Spearman rank correlation of the signal at
+  bar `t` vs the return from `t` to `t+horizon`. `|IC| ≳ 0.03` is the rough line
+  where a signal is plausibly useful; near 0 means no edge.
+- **Hit rate** — fraction of non-neutral signals whose sign matched the move.
+- **Forward return by signal bucket** — monotonic increase = the signal orders
+  returns correctly.
+- A **long/flat backtest** plus a **buy-and-hold benchmark** — beat buy-and-hold
+  or the signal added nothing.
+
+```python
+from data_service.signals import evaluate_predictive_value, make_signal_strategy
+from data_service.backtest import BacktestEngine
+
+ev = evaluate_predictive_value(price_df, horizon=5)   # {'ic':..., 'hit_rate':..., ...}
+engine = BacktestEngine()
+results = engine.run_backtest(price_df, make_signal_strategy(buy_threshold=0.15))
+```
+
+**Example result (AAPL, 5y daily):** IC ≈ +0.06 with monotonically increasing
+bucket returns — a *weak* real edge — yet the long/flat strategy returned ~+55%
+vs ~+148% buy-and-hold. Lesson: a small positive IC does **not** mean a tradeable
+edge; sitting in cash during a strong uptrend cost more than the signal earned.
+Always compare against buy-and-hold before trusting a signal.
+
 ## Testing
 
 ```bash
-python -m pytest tests/test_signals.py -v
+python -m pytest tests/test_signals.py tests/test_signal_backtest.py -v
 ```
