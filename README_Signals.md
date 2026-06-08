@@ -115,8 +115,38 @@ vs ~+148% buy-and-hold. Lesson: a small positive IC does **not** mean a tradeabl
 edge; sitting in cash during a strong uptrend cost more than the signal earned.
 Always compare against buy-and-hold before trusting a signal.
 
+## Multi-symbol & walk-forward validation (don't trust one backtest)
+
+`signal_sweep` stress-tests a signal across a basket and across time, and checks
+whether it is actually monetizable:
+
+- **`ic_sweep`** — time-series IC per symbol across multiple horizons + aggregate.
+- **`walk_forward_ic`** — IC across contiguous time folds (regime stability).
+- **`cross_sectional_ls`** — market-neutral long/short backtest (long top-signal
+  names, short bottom) vs a hold-the-basket benchmark.
+
+```bash
+python examples/signal_sweep_demo.py            # default 16-name basket
+```
+
+### Findings on the current composite (16-name basket, ~8y daily)
+
+| Test | Result | Read |
+|------|--------|------|
+| Aggregate time-series IC | **+0.02 to +0.05**, 83–92% of symbols positive | Weak but real predictive value |
+| Where it works | Strong on indices/mean-reverters (SPY ~0.13, WMT, KO); weak/negative on momentum tech (NVDA, META) | It's a **mean-reversion** signal |
+| Walk-forward (SPY) | All 5 folds positive (0.07–0.28) | Stable over time |
+| **Cross-sectional L/S** | **−8% ann, Sharpe −0.42** vs **+20%, Sharpe ~1.0** hold-basket | **Not monetizable** as a selector |
+
+**The key lesson (baked into the tooling):** a positive *time-series* IC did
+**not** become a tradeable edge. Cross-sectionally the signal longs recent
+losers / shorts recent winners — an anti-momentum bet that underperformed badly.
+Always run `cross_sectional_ls` and compare to the hold-basket benchmark before
+believing a signal makes money. This is why the module ships the benchmark in
+the same call.
+
 ## Testing
 
 ```bash
-python -m pytest tests/test_signals.py tests/test_signal_backtest.py -v
+python -m pytest tests/test_signals.py tests/test_signal_backtest.py tests/test_signal_sweep.py -v
 ```
