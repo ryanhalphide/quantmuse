@@ -110,6 +110,14 @@ class TestBacktestMechanics(unittest.TestCase):
         hi = tsmom_backtest(data, TSMOMConfig(cost_bps=50.0))["equity_curve"].iloc[-1]
         self.assertGreater(lo, hi)
 
+    def test_buffer_reduces_turnover(self):
+        from dataclasses import replace
+        data = _basket(n_up=6, n_days=1200)
+        base = TSMOMConfig(buffer_fraction=0.0)
+        no_buf = tsmom_backtest(data, base)["ann_turnover"]
+        buf = tsmom_backtest(data, replace(base, buffer_fraction=0.20))["ann_turnover"]
+        self.assertLess(buf, no_buf)
+
     def test_equity_starts_at_one(self):
         res = tsmom_backtest(_basket(), TSMOMConfig())
         self.assertAlmostEqual(float(res["equity_curve"].iloc[0]), 1.0, places=6)

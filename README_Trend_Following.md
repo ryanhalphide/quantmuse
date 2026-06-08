@@ -38,7 +38,9 @@ produces a genuinely positive, robust, defensible result.
 - **Sizing**: inverse-volatility position sizing to a per-asset vol budget, then the
   whole book scaled to a portfolio vol target (default 15%), with per-asset and
   gross-leverage caps. Long/short and long/flat variants (long/flat just clips
-  shorts to zero, so the long side is identical).
+  shorts to zero, so the long side is identical). **Position buffering** (a
+  no-trade band, default 0.15) cuts turnover ~28% (29.5× → 21×) and lifts net
+  Sharpe (0.62 → 0.65) by reducing cost drag on persistent trend positions.
 - **Backtest**: vectorized, **mark-to-market**, lookahead-free (single central
   `shift(1)`; vol scaling uses only trailing data) — generalizing the repo's
   `long_flat_backtest` to a multi-asset panel with per-asset turnover costs.

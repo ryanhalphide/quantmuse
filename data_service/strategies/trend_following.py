@@ -53,6 +53,7 @@ class TSMOMConfig:
     portfolio_vol_lookback: int = 63   # window for portfolio vol estimate (~quarter)
     max_asset_leverage: float = 2.0    # cap on |weight| per asset
     max_gross_leverage: float = 4.0    # cap on sum |weight|
+    buffer_fraction: float = 0.15      # no-trade band (fraction of target) to cut turnover
     direction: str = "long_short"      # or "long_flat"
     cost_bps: float = 5.0              # transaction cost per unit turnover, bps
     initial_capital: float = 100_000.0
@@ -144,6 +145,25 @@ def _apply_portfolio_vol_target(W: pd.DataFrame, R: pd.DataFrame, cfg: TSMOMConf
 # --------------------------------------------------------------------------- #
 # Weight panel + backtest                                                      #
 # --------------------------------------------------------------------------- #
+def _apply_buffer(W: pd.DataFrame, buffer_fraction: float) -> pd.DataFrame:
+    """No-trade band: hold the current position until the target moves more than
+    ``buffer_fraction * |target|`` away, then jump to the new target. Causal and
+    path-dependent only on the past, so no lookahead. Cuts turnover/cost materially
+    (Carver-style buffering) at the price of slightly staler positions."""
+    if buffer_fraction <= 0:
+        return W
+    vals = W.values
+    out = np.empty_like(vals)
+    prev = np.zeros(vals.shape[1])
+    for t in range(vals.shape[0]):
+        target = vals[t]
+        band = buffer_fraction * np.abs(target)
+        newpos = np.where(np.abs(target - prev) > band, target, prev)
+        out[t] = newpos
+        prev = newpos
+    return pd.DataFrame(out, index=W.index, columns=W.columns)
+
+
 def _aligned_closes(price_data: Dict[str, pd.DataFrame], close_col: str) -> pd.DataFrame:
     closes = pd.DataFrame({sym: df[close_col].astype(float) for sym, df in price_data.items()})
     return closes.sort_index()
@@ -161,6 +181,7 @@ def build_weights(price_data: Dict[str, pd.DataFrame], cfg: TSMOMConfig,
     # Mask assets that don't yet have a valid forecast/vol (different start dates).
     W = W.where(F.notna() & V.notna(), 0.0).fillna(0.0)
     W = _apply_portfolio_vol_target(W, R.fillna(0.0), cfg)
+    W = _apply_buffer(W, cfg.buffer_fraction)
     return W, F, R
 
 
