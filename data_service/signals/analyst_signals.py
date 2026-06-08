@@ -57,6 +57,69 @@ def _rank_ic(signal: pd.Series, fwd_ret: pd.Series, min_n: int = 50) -> Optional
     return float(ic) if pd.notna(ic) else None
 
 
+def _strip_tz(idx: pd.DatetimeIndex) -> pd.DatetimeIndex:
+    idx = pd.to_datetime(idx)
+    if idx.tz is not None:
+        idx = idx.tz_localize(None)
+    return idx.normalize()
+
+
+def pooled_horizon_ic(
+    price_data: Dict[str, pd.DataFrame],
+    signal_data: Dict[str, pd.Series],
+    horizons=(1, 5, 21),
+    close_col: str = "close",
+    min_n: int = 200,
+) -> Dict[str, Any]:
+    """Pooled daily IC of a differentiated signal across multiple horizons.
+
+    For short-horizon data (e.g. news sentiment) a monthly test is too coarse.
+    This aligns each symbol's daily signal with the daily technical signal and
+    forward returns at several horizons, pools across the basket, and reports --
+    per horizon -- the IC of the signal, the technical signal, and the
+    equal-weight z-blend, plus the (horizon-independent) correlation between the
+    two signals. Indices are tz-normalized so price/signal sources can be mixed.
+    """
+    frames = []
+    for sym, sig in signal_data.items():
+        px = price_data.get(sym)
+        if px is None or px.empty or sig is None or len(sig.dropna()) == 0:
+            continue
+        px = px.copy()
+        px.index = _strip_tz(px.index)
+        close = px[close_col].astype(float)
+        tech = compute_technical_signal_series(px, close_col=close_col)["score"]
+        s = sig.dropna().copy()
+        s.index = _strip_tz(s.index)
+        d = pd.DataFrame({"signal": s, "tech": tech, "close": close}).dropna()
+        for h in horizons:
+            d[f"f{h}"] = d["close"].shift(-h) / d["close"] - 1.0
+        frames.append(d)
+
+    if not frames:
+        return {"n": 0, "horizons": {}, "note": "no aligned data"}
+
+    panel = pd.concat(frames)
+
+    def z(x: pd.Series) -> pd.Series:
+        return (x - x.mean()) / x.std() if x.std() > 0 else x * 0.0
+
+    combo = z(panel["signal"]) + z(panel["tech"])
+    out = {
+        "n": len(panel),
+        "signal_correlation": float(panel["signal"].corr(panel["tech"])),
+        "horizons": {},
+    }
+    for h in horizons:
+        f = panel[f"f{h}"]
+        out["horizons"][h] = {
+            "ic_signal": _rank_ic(panel["signal"], f, min_n),
+            "ic_technical": _rank_ic(panel["tech"], f, min_n),
+            "ic_combined": _rank_ic(combo, f, min_n),
+        }
+    return out
+
+
 def evaluate_signal_orthogonality(
     price_data: Dict[str, pd.DataFrame],
     signal_data: Dict[str, pd.Series],

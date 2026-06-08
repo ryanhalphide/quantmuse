@@ -9,6 +9,7 @@ from data_service.signals.analyst_signals import (
     revision_signal,
     evaluate_orthogonality,
     evaluate_signal_orthogonality,
+    pooled_horizon_ic,
 )
 from data_service.fetchers.fmp_fetcher import FMPFetcher
 
@@ -103,6 +104,37 @@ class TestGenericOrthogonality(unittest.TestCase):
         self.assertGreaterEqual(res["n"], 50)
         self.assertIn("ic_signal", res)
         self.assertGreater(res["ic_signal"], 0.5)  # signal == fwd ret -> high IC
+
+
+class TestPooledHorizonIC(unittest.TestCase):
+    def test_structure_and_tz_mixing(self):
+        # Mix a tz-aware price index with a tz-naive signal index -> must align.
+        rng = np.random.RandomState(4)
+        price_data, signal_data = {}, {}
+        for i in range(6):
+            aware = pd.date_range("2022-01-01", periods=400, freq="D", tz="UTC")
+            closes = 100 + np.cumsum(rng.randn(400))
+            price_data[f"S{i}"] = pd.DataFrame({"close": closes}, index=aware)
+            naive = pd.date_range("2022-01-01", periods=400, freq="D")
+            signal_data[f"S{i}"] = pd.Series(rng.randn(400), index=naive)
+        res = pooled_horizon_ic(price_data, signal_data, horizons=(1, 5), min_n=100)
+        self.assertGreater(res["n"], 100)
+        self.assertIn("signal_correlation", res)
+        self.assertIn(1, res["horizons"])
+        self.assertIn("ic_combined", res["horizons"][5])
+
+    def test_recovers_known_horizon_signal(self):
+        # Signal == forward 5d return -> very high IC at horizon 5.
+        rng = np.random.RandomState(8)
+        price_data, signal_data = {}, {}
+        for i in range(5):
+            idx = pd.date_range("2021-01-01", periods=500, freq="D")
+            closes = 100 + np.cumsum(rng.randn(500))
+            df = pd.DataFrame({"close": closes}, index=idx)
+            price_data[f"S{i}"] = df
+            signal_data[f"S{i}"] = (df["close"].shift(-5) / df["close"] - 1.0).fillna(0.0)
+        res = pooled_horizon_ic(price_data, signal_data, horizons=(5,), min_n=100)
+        self.assertGreater(res["horizons"][5]["ic_signal"], 0.5)
 
 
 class TestFMPFetcher(unittest.TestCase):

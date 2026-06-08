@@ -182,35 +182,56 @@ is ready to produce a real verdict the moment a paid key (or deeper history)
 is supplied. Insider and congressional-trade signals are stubbed for the same
 reason: real, plausibly-differentiated, but gated behind a paid plan here.
 
-### Differentiated-data providers: all gated behind paid keys
-
-Surveying alternatives (per the FMP-alternatives list and the live data MCPs
-available here) for a *free, history-bearing, differentiated* feed came up empty:
+### Differentiated-data providers
 
 | Source | Differentiated data | Status here |
 |--------|--------------------|-------------|
 | FMP free | analyst rating counts | ~10 monthly snapshots only; insider/congress/news paid |
 | LunarCrush | social-sentiment **time series** | paid — no active subscription, time series locked |
-| EODHD / FinancialData.Net | sentiment, insider, deep history | need an API key (not configured) |
+| **EODHD** | **daily news-sentiment** | **free key works — 5y of daily history (used in iteration 4)** |
 | Alpha Vantage | NEWS_SENTIMENT, fundamentals | needs key; free tier 25 req/day |
 
-So the harness is now **provider-agnostic**: `evaluate_signal_orthogonality`
-takes `{symbol: dated_signal_series}` from *any* source and runs the same
-IC-vs-technical / combined-IC / correlation test. The moment a key for any
-provider above is supplied, wiring a fetcher + one signal series produces a real
-verdict — no changes to the test harness needed.
+The harness is **provider-agnostic**: `evaluate_signal_orthogonality` (bucketed)
+and `pooled_horizon_ic` (daily, multi-horizon) take `{symbol: dated_signal_series}`
+from *any* source and run the same IC-vs-technical / combined-IC / correlation test.
 
-### Conclusion after three iterations
+### Iteration 4: EODHD news-sentiment — orthogonal, but no alpha
 
-Rigorous, repeatable testing finds **no simple price-only signal that beats
-buy-and-hold** here — matching the prediction-market research — and the one free
-*differentiated* source (analyst ratings) is too shallow to validate. The honest
-takeaway: a real edge needs data we don't have for free (deep history, paid
-alt-data) — and even then it must clear this bar. The durable deliverable is the
-**measurement framework** — IC, walk-forward stability, cross-sectional L/S,
-risk-adjusted long/flat, and now an orthogonality test for new data sources —
-that makes "does this actually make money?" answerable in seconds and stops any
-signal from looking good in isolation.
+With an EODHD free key, pulled **5 years of daily news-sentiment** for 12 large
+caps (`EODHDFetcher`) and ran `pooled_horizon_ic` — 14,155 pooled daily
+observations:
+
+```
+corr(sentiment, technical): -0.124   (≈ orthogonal — good)
+ horizon   IC_sent   IC_tech   IC_combo
+      1d   +0.0045   +0.0157   +0.0158
+      5d   -0.0069   +0.0333   +0.0209
+     21d   +0.0085   +0.0306   +0.0243
+```
+
+Reproduce: `EODHD_API_KEY=... python examples/eodhd_sentiment_demo.py`
+
+**Verdict:** sentiment is genuinely *orthogonal* to price (corr −0.12) — the one
+thing that went right — but it carries **no usable IC** (|IC| ≤ 0.009 at every
+horizon, well inside noise), and **adding it to the price signal makes things
+worse**, not better (5d combined IC 0.021 < technical's 0.033). The price signal's
+own IC (~0.03 at 5d) looks non-trivial but pooled daily obs overlap and are
+cross-sectionally correlated, so its real significance is far lower — and
+iteration 2 already showed that edge is too small to beat buy-and-hold after costs.
+
+### Conclusion after four iterations
+
+Across price-only signals (iterations 1–2) and a genuinely differentiated
+alt-data source (iteration 4), **rigorous testing finds no signal that produces a
+tradeable edge** — matching the prediction-market research. Notably, the analysis
+killed each idea *correctly*: weak cross-sectional sign, sub-benchmark Sharpe,
+zero orthogonal IC. The durable deliverable is the **measurement framework** — IC,
+walk-forward stability, cross-sectional L/S, risk-adjusted long/flat, and the
+provider-agnostic orthogonality / multi-horizon IC tests — that makes "does this
+actually make money?" answerable in seconds and stops any signal from looking
+good in isolation. The next real shot at alpha needs data with shorter decay
+(intraday, order flow) or true information asymmetry, not another transform of
+what's already public.
 
 ## Testing
 

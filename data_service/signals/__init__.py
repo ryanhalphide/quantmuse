@@ -36,12 +36,14 @@ try:
         revision_signal,
         evaluate_orthogonality,
         evaluate_signal_orthogonality,
+        pooled_horizon_ic,
     )
 except ImportError:
     consensus_score = None
     revision_signal = None
     evaluate_orthogonality = None
     evaluate_signal_orthogonality = None
+    pooled_horizon_ic = None
 
 __all__ = [
     "SignalProvider",
@@ -59,4 +61,5 @@ __all__ = [
     "revision_signal",
     "evaluate_orthogonality",
     "evaluate_signal_orthogonality",
+    "pooled_horizon_ic",
 ]

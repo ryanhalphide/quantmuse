@@ -20,7 +20,7 @@ warnings.filterwarnings("ignore")
 
 from data_service.fetchers.yahoo_fetcher import YahooFetcher
 from data_service.fetchers.eodhd_fetcher import EODHDFetcher
-from data_service.signals.analyst_signals import evaluate_signal_orthogonality
+from data_service.signals.analyst_signals import pooled_horizon_ic
 
 DEFAULT = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "JPM", "XOM", "KO", "WMT"]
 
@@ -44,27 +44,25 @@ def main():
     price_data, signal_data = {}, {}
     for s in symbols:
         try:
-            sig = eod.monthly_sentiment_signal(s, fr, to)
+            sent = eod.get_sentiment(s, fr, to)
             df = yf.fetch_historical_data(s, start_time=start, end_time=end, interval="1d")
-            if not sig.empty and not df.empty:
-                signal_data[s] = sig
+            if not sent.empty and not df.empty:
+                signal_data[s] = sent["normalized"]  # daily sentiment series
                 price_data[s] = df
-                print(f"  {s}: {len(sig)} monthly sentiment points "
-                      f"(latest {sig.iloc[-1]:+.3f})")
+                print(f"  {s}: {len(sent)} daily sentiment points")
         except Exception as e:
             print(f"skip {s}: {e}")
 
     print(f"\nLoaded sentiment + price for {len(signal_data)} symbols")
-    res = evaluate_signal_orthogonality(price_data, signal_data, min_n=50)
+    # Sentiment is a short-horizon signal -> use the multi-horizon daily test.
+    res = pooled_horizon_ic(price_data, signal_data, horizons=(1, 5, 21))
     print("\n=== Does EODHD sentiment add value over price? ===")
-    if res.get("note"):
-        print(f"  {res['note']}")
-    else:
-        print(f"  pooled observations: {res['n']}")
-        print(f"  IC sentiment: {res['ic_signal']:+.4f}")
-        print(f"  IC technical: {res['ic_technical']:+.4f}")
-        print(f"  IC combined:  {res['ic_combined']:+.4f}  (> both => additive)")
-        print(f"  signal correlation: {res['signal_correlation']:+.3f}  (near 0 => orthogonal)")
+    print(f"  pooled daily observations: {res['n']}")
+    print(f"  corr(sentiment, technical): {res['signal_correlation']:+.3f}  (near 0 => orthogonal)")
+    print(f"  {'horizon':>7} {'IC_sent':>9} {'IC_tech':>9} {'IC_combo':>9}")
+    for h, m in res["horizons"].items():
+        print(f"  {h:>6}d {m['ic_signal']:>+9.4f} {m['ic_technical']:>+9.4f} "
+              f"{m['ic_combined']:>+9.4f}")
 
 
 if __name__ == "__main__":
