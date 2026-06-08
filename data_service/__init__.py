@@ -55,6 +55,14 @@ except ImportError:
     StockSelector = None
     FactorOptimizer = None
 
+# Signal providers
+try:
+    from .signals import SignalProvider, SignalResult, AlphaVantageSignalProvider
+except ImportError:
+    SignalProvider = None
+    SignalResult = None
+    AlphaVantageSignalProvider = None
+
 __version__ = "0.1.0"
 
 __all__ = [
@@ -94,5 +102,10 @@ __all__ = [
     'FactorScreener',
     'FactorBacktest',
     'StockSelector',
-    'FactorOptimizer'
+    'FactorOptimizer',
+
+    # Signal providers
+    'SignalProvider',
+    'SignalResult',
+    'AlphaVantageSignalProvider'
 ] 
