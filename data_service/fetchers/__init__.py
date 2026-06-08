@@ -19,4 +19,9 @@ try:
 except ImportError:
     KalshiFetcher = None
 
-__all__ = ['BinanceFetcher', 'AlphaVantageFetcher', 'YahooFetcher', 'KalshiFetcher']
+try:
+    from .fmp_fetcher import FMPFetcher
+except ImportError:
+    FMPFetcher = None
+
+__all__ = ['BinanceFetcher', 'AlphaVantageFetcher', 'YahooFetcher', 'KalshiFetcher', 'FMPFetcher']

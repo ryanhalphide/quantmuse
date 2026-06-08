@@ -161,16 +161,42 @@ The smaller drawdowns come only from sitting in cash most of the time, not from
 skill — on Sharpe (which controls for that) the signal **loses to buy-and-hold**
 even on its best assets.
 
-### Conclusion after two iterations
+### Iteration 3: differentiated (non-price) data — analyst ratings
 
-Rigorous, repeatable testing finds **no simple technical signal that beats
-buy-and-hold** here — matching the prediction-market research. The deliverable
-is the measurement framework (IC, walk-forward, cross-sectional L/S, risk-adjusted
-long/flat) that makes "does this make money?" answerable in seconds and stops a
+Price-only signals showed no edge, so we added a *differentiated* data provider
+(`FMPFetcher`) and an analyst-rating signal (`consensus_score`, `revision_signal`),
+plus `evaluate_orthogonality` — which tests whether the analyst signal adds value
+*over* the technical signal (IC of each vs combined, plus their correlation).
+
+```bash
+export FMP_API_KEY=your_key
+python examples/analyst_signal_demo.py AAPL MSFT NVDA JPM KO WMT
+```
+
+**Honest constraint found:** on FMP's **free tier**, analyst history is only ~10
+monthly snapshots and insider/congressional/news data are paid-gated. That is
+enough to wire up and unit-test the pipeline, but **too shallow to validate**
+predictive value — `evaluate_orthogonality` correctly reports `underpowered`
+rather than printing a meaningless IC from a handful of points. The integration
+is ready to produce a real verdict the moment a paid key (or deeper history)
+is supplied. Insider and congressional-trade signals are stubbed for the same
+reason: real, plausibly-differentiated, but gated behind a paid plan here.
+
+### Conclusion after three iterations
+
+Rigorous, repeatable testing finds **no simple price-only signal that beats
+buy-and-hold** here — matching the prediction-market research — and the one free
+*differentiated* source (analyst ratings) is too shallow to validate. The honest
+takeaway: a real edge needs data we don't have for free (deep history, paid
+alt-data) — and even then it must clear this bar. The durable deliverable is the
+**measurement framework** — IC, walk-forward stability, cross-sectional L/S,
+risk-adjusted long/flat, and now an orthogonality test for new data sources —
+that makes "does this actually make money?" answerable in seconds and stops any
 signal from looking good in isolation.
 
 ## Testing
 
 ```bash
-python -m pytest tests/test_signals.py tests/test_signal_backtest.py tests/test_signal_sweep.py -v
+python -m pytest tests/test_signals.py tests/test_signal_backtest.py \
+  tests/test_signal_sweep.py tests/test_analyst_signals.py -v
 ```
