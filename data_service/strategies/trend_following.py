@@ -41,6 +41,7 @@ class TSMOMConfig:
     """All knobs for the trend-following system (canonical defaults, not tuned)."""
 
     ewmac_pairs: Tuple[Tuple[int, int], ...] = ((16, 64), (32, 128), (64, 256))
+    breakout_windows: Tuple[int, ...] = (40, 80, 160)  # Donchian breakout lookbacks
     use_ts_sign: bool = False          # alt rule: 12m sign + 200d MA filter
     ts_lookback: int = 252             # 12 months
     ma_filter: int = 200               # 200-day trend filter for the ts-sign rule
@@ -82,6 +83,16 @@ def _scale_and_cap(forecast: pd.Series, target_abs: float, cap: float) -> pd.Ser
     return (forecast * scalar).clip(-cap, cap)
 
 
+def _breakout_forecast(close: pd.Series, window: int) -> pd.Series:
+    """Donchian-channel breakout (Carver-style): where the price sits within its
+    rolling [min, max] band, smoothed. Captures trends differently from EWMAC."""
+    roll_max = close.rolling(window, min_periods=window).max()
+    roll_min = close.rolling(window, min_periods=window).min()
+    roll_mean = (roll_max + roll_min) / 2.0
+    raw = (close - roll_mean) / (roll_max - roll_min).replace(0.0, np.nan)  # ~[-0.5, 0.5]
+    return raw.ewm(span=max(window // 4, 1), adjust=False).mean()
+
+
 def _ts_sign_forecast(close: pd.Series, cfg: TSMOMConfig) -> pd.Series:
     """12-month trend sign gated by a 200-day moving-average filter; in {-1, 0, +1}."""
     past_ret = close / close.shift(cfg.ts_lookback) - 1.0
@@ -105,6 +116,9 @@ def compute_forecast_series(close: pd.Series, cfg: TSMOMConfig) -> pd.Series:
     for fast, slow in cfg.ewmac_pairs:
         f = _ewmac_forecast(close, fast, slow, cfg.vol_lookback)
         rules.append(_scale_and_cap(f, cfg.target_abs_forecast, cfg.forecast_cap))
+    for window in cfg.breakout_windows:
+        b = _breakout_forecast(close, window)
+        rules.append(_scale_and_cap(b, cfg.target_abs_forecast, cfg.forecast_cap))
     combined = pd.concat(rules, axis=1).mean(axis=1)
     return (combined * cfg.fdm).clip(-cfg.forecast_cap, cfg.forecast_cap)
 

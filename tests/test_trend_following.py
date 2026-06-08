@@ -13,6 +13,7 @@ from data_service.strategies.trend_following import (
     run_both_directions,
     live_target_weights,
     _ewmac_forecast,
+    _breakout_forecast,
 )
 from data_service.strategies.trend_following_robustness import (
     walk_forward,
@@ -51,6 +52,12 @@ class TestForecast(unittest.TestCase):
     def test_uptrend_positive_downtrend_negative(self):
         up = _ewmac_forecast(_trending_df(drift=0.002, noise=0.004)["close"], 16, 64, 33).dropna()
         dn = _ewmac_forecast(_trending_df(drift=-0.002, noise=0.004)["close"], 16, 64, 33).dropna()
+        self.assertGreater(up.iloc[-1], 0)
+        self.assertLess(dn.iloc[-1], 0)
+
+    def test_breakout_sign(self):
+        up = _breakout_forecast(_trending_df(drift=0.002, noise=0.004)["close"], 80).dropna()
+        dn = _breakout_forecast(_trending_df(drift=-0.002, noise=0.004)["close"], 80).dropna()
         self.assertGreater(up.iloc[-1], 0)
         self.assertLess(dn.iloc[-1], 0)
 

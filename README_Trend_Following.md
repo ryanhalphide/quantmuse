@@ -32,8 +32,10 @@ produces a genuinely positive, robust, defensible result.
   Yahoo fallback). All free. Handles Binance's 1000-candle pagination and the
   tz-aware/naive mismatch, and aligns crypto onto the ETF trading calendar.
 - **Signal** (`trend_following.py`): an ensemble of EWMAC (EWMA crossover) rules at
-  canonical speeds (16/64, 32/128, 64/256), volatility-normalized and capped;
-  optional 12-month trend sign + 200-day MA filter. Parameters are canonical, **not
+  canonical speeds (16/64, 32/128, 64/256) **plus Donchian breakout rules** (40/80/160),
+  volatility-normalized and capped; optional 12-month trend sign + 200-day MA filter.
+  Combining rule *types* diversifies the signal — adding breakout lifts Sharpe in both
+  the 12y (0.65→0.73) and 19y (0.63→0.69) windows. Parameters are canonical, **not
   tuned** to this data.
 - **Sizing**: inverse-volatility position sizing to a per-asset vol budget, then the
   whole book scaled to a portfolio vol target (default 15%), with per-asset and
@@ -83,6 +85,24 @@ drawdown** (−34% → −18%), even in a bull market. That is the honest, evide
 way this makes money: a diversifier that improves a portfolio's risk-adjusted
 return, with crisis-alpha character that should help most in the regimes (2008/2022
 style) absent from this particular window.
+
+## Crisis alpha (the 12y window hid this)
+
+Backtesting over a longer window that includes the 2008 GFC (`--years 19`) shows
+what trend following is actually for. Calendar-year long/short returns vs SPY:
+
+| Year | Trend | SPY | |
+|------|-------|-----|--|
+| 2008 | **+14.1%** | −36.8% | GFC |
+| 2018 | +3.0% | −4.6% | Q4 selloff |
+| 2020 | +23.9% | +18.3% | COVID |
+| 2022 | **+11.8%** | −18.2% | rate shock |
+| 2023 | −15.7% | +26.2% | trend's worst (whipsaw) |
+
+Over **2007–2026**, trend matches SPY's Sharpe (**0.63 vs 0.63**) but with **less
+than half the max drawdown (−26.6% vs −55.2%)**, at ~0 correlation. It gives up
+upside in calm bull markets and pays off in crises — which is precisely why it is
+a powerful *diversifier* rather than a standalone replacement for equities.
 
 ## Usage
 
