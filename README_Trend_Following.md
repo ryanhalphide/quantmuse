@@ -42,7 +42,10 @@ produces a genuinely positive, robust, defensible result.
   gross-leverage caps. Long/short and long/flat variants (long/flat just clips
   shorts to zero, so the long side is identical). **Position buffering** (a
   no-trade band, default 0.15) cuts turnover ~28% (29.5× → 21×) and lifts net
-  Sharpe (0.62 → 0.65) by reducing cost drag on persistent trend positions.
+  Sharpe by reducing cost drag on persistent trend positions. A **Carver vol
+  floor** (default blend 0.3) blends each asset's realized vol with its long-run
+  mean before sizing — preventing oversized positions in calm stretches; it lifts
+  Sharpe (12y 0.73→0.75, 19y 0.69→0.71) *and* reduces drawdown in both windows.
 - **Backtest**: vectorized, **mark-to-market**, lookahead-free (single central
   `shift(1)`; vol scaling uses only trailing data) — generalizing the repo's
   `long_flat_backtest` to a multi-asset panel with per-asset turnover costs.

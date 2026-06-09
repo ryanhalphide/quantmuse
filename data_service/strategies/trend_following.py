@@ -55,6 +55,7 @@ class TSMOMConfig:
     max_asset_leverage: float = 2.0    # cap on |weight| per asset
     max_gross_leverage: float = 4.0    # cap on sum |weight|
     buffer_fraction: float = 0.15      # no-trade band (fraction of target) to cut turnover
+    vol_floor_blend: float = 0.3       # blend realized vol with its long-run mean (Carver floor)
     direction: str = "long_short"      # or "long_flat"
     cost_bps: float = 5.0              # transaction cost per unit turnover, bps
     initial_capital: float = 100_000.0
@@ -123,9 +124,19 @@ def compute_forecast_series(close: pd.Series, cfg: TSMOMConfig) -> pd.Series:
     return (combined * cfg.fdm).clip(-cfg.forecast_cap, cfg.forecast_cap)
 
 
-def realized_vol(close: pd.Series, lookback: int, ann_factor: int = ANN) -> pd.Series:
-    """Annualized EWMA volatility of daily returns."""
-    return close.astype(float).pct_change().ewm(span=lookback, adjust=False).std() * np.sqrt(ann_factor)
+def realized_vol(close: pd.Series, lookback: int, ann_factor: int = ANN,
+                 floor_blend: float = 0.0) -> pd.Series:
+    """Annualized EWMA volatility of daily returns.
+
+    With ``floor_blend`` > 0, blend the fast estimate with its expanding long-run
+    mean (Carver vol floor): ``(1-b)*fast + b*long_run``. This lifts the vol used
+    for sizing during unusually calm stretches, preventing the oversized positions
+    that make inverse-vol sizing blow up when a lull ends. Causal (expanding mean)."""
+    vol = close.astype(float).pct_change().ewm(span=lookback, adjust=False).std() * np.sqrt(ann_factor)
+    if floor_blend > 0:
+        long_run = vol.expanding(min_periods=lookback).mean()
+        vol = (1.0 - floor_blend) * vol + floor_blend * long_run.fillna(vol)
+    return vol
 
 
 # --------------------------------------------------------------------------- #
@@ -190,7 +201,7 @@ def build_weights(price_data: Dict[str, pd.DataFrame], cfg: TSMOMConfig,
     R = closes.pct_change()
     F = pd.DataFrame({sym: compute_forecast_series(closes[sym].dropna(), cfg) for sym in closes})
     F = F.reindex(closes.index)
-    V = pd.DataFrame({sym: realized_vol(closes[sym], cfg.vol_lookback, cfg.ann_factor) for sym in closes})
+    V = pd.DataFrame({sym: realized_vol(closes[sym], cfg.vol_lookback, cfg.ann_factor, cfg.vol_floor_blend) for sym in closes})
     W = pd.DataFrame({sym: _position_from_forecast(F[sym], V[sym], cfg) for sym in closes})
     # Mask assets that don't yet have a valid forecast/vol (different start dates).
     W = W.where(F.notna() & V.notna(), 0.0).fillna(0.0)
@@ -275,7 +286,7 @@ def live_target_weights(price_data: Dict[str, pd.DataFrame], cfg: TSMOMConfig = 
     cfg = cfg or TSMOMConfig()
     W, F, R = build_weights(price_data, cfg, close_col)
     closes = _aligned_closes(price_data, close_col)
-    V = pd.DataFrame({sym: realized_vol(closes[sym], cfg.vol_lookback, cfg.ann_factor) for sym in closes})
+    V = pd.DataFrame({sym: realized_vol(closes[sym], cfg.vol_lookback, cfg.ann_factor, cfg.vol_floor_blend) for sym in closes})
     return pd.DataFrame({
         "forecast": F.iloc[-1],
         "realized_vol": V.iloc[-1],

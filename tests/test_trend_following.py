@@ -74,6 +74,20 @@ class TestForecast(unittest.TestCase):
 
 
 class TestVolTargeting(unittest.TestCase):
+    def test_vol_floor_lifts_calm_period_vol(self):
+        # A series that is calm then volatile: with a floor, the calm-period vol
+        # estimate is lifted toward the long-run mean (no lookahead: expanding).
+        rng = np.random.RandomState(1)
+        calm = 0.002 * rng.randn(400)
+        wild = 0.03 * rng.randn(400)
+        import pandas as _pd
+        close = _pd.Series(100 * np.cumprod(1 + np.concatenate([wild, calm])),
+                           index=_pd.date_range("2015-01-01", periods=800, freq="B"))
+        plain = realized_vol(close, 33, floor_blend=0.0)
+        floored = realized_vol(close, 33, floor_blend=0.5)
+        # In the late calm stretch the floored estimate should sit above the plain one.
+        self.assertGreater(floored.iloc[-1], plain.iloc[-1])
+
     def test_realized_vol_recovers_known_vol(self):
         rng = np.random.RandomState(0)
         daily = 0.01  # 1% daily -> ~15.9% annualized
