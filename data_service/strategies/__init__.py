@@ -69,6 +69,14 @@ except ImportError:
     CRYPTO_UNIVERSE = None
 
 try:
+    from .carry import build_carry_panel, bond_carry, equity_carry, crypto_carry
+except ImportError:
+    build_carry_panel = None
+    bond_carry = None
+    equity_carry = None
+    crypto_carry = None
+
+try:
     from .trend_following_robustness import (
         walk_forward,
         parameter_sensitivity,
@@ -95,6 +103,10 @@ __all__ += [
     'align_calendar',
     'ETF_UNIVERSE',
     'CRYPTO_UNIVERSE',
+    'build_carry_panel',
+    'bond_carry',
+    'equity_carry',
+    'crypto_carry',
     'walk_forward',
     'parameter_sensitivity',
     'per_asset_contribution',

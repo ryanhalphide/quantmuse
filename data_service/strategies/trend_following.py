@@ -56,6 +56,7 @@ class TSMOMConfig:
     max_gross_leverage: float = 4.0    # cap on sum |weight|
     buffer_fraction: float = 0.15      # no-trade band (fraction of target) to cut turnover
     vol_floor_blend: float = 0.3       # blend realized vol with its long-run mean (Carver floor)
+    carry_weight: float = 0.0          # 0..1 blend of the carry sleeve into the book
     direction: str = "long_short"      # or "long_flat"
     cost_bps: float = 5.0              # transaction cost per unit turnover, bps
     initial_capital: float = 100_000.0
@@ -195,8 +196,15 @@ def _aligned_closes(price_data: Dict[str, pd.DataFrame], close_col: str) -> pd.D
 
 
 def build_weights(price_data: Dict[str, pd.DataFrame], cfg: TSMOMConfig,
-                  close_col: str = "close") -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Return (weights, forecasts, asset_returns) panels aligned on a common index."""
+                  close_col: str = "close",
+                  carry_panel: Optional[pd.DataFrame] = None,
+                  ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Return (weights, forecasts, asset_returns) panels aligned on a common index.
+
+    When ``carry_panel`` is given and ``cfg.carry_weight`` > 0, the per-asset trend
+    and carry weights are blended BEFORE portfolio vol targeting and buffering, so
+    the two sleeves net against each other and share one cost/risk budget.
+    """
     closes = _aligned_closes(price_data, close_col)
     R = closes.pct_change()
     F = pd.DataFrame({sym: compute_forecast_series(closes[sym].dropna(), cfg) for sym in closes})
@@ -205,6 +213,14 @@ def build_weights(price_data: Dict[str, pd.DataFrame], cfg: TSMOMConfig,
     W = pd.DataFrame({sym: _position_from_forecast(F[sym], V[sym], cfg) for sym in closes})
     # Mask assets that don't yet have a valid forecast/vol (different start dates).
     W = W.where(F.notna() & V.notna(), 0.0).fillna(0.0)
+
+    if carry_panel is not None and cfg.carry_weight > 0:
+        C = carry_panel.reindex(index=closes.index, columns=closes.columns)
+        Wc = pd.DataFrame({sym: _position_from_forecast(C[sym], V[sym], cfg) for sym in closes})
+        Wc = Wc.where(C.notna() & V.notna(), 0.0).fillna(0.0)
+        cw = cfg.carry_weight
+        W = (1.0 - cw) * W + cw * Wc
+
     W = _apply_portfolio_vol_target(W, R.fillna(0.0), cfg)
     W = _apply_buffer(W, cfg.buffer_fraction)
     return W, F, R
@@ -222,14 +238,16 @@ def _metrics(r: pd.Series, eq: pd.Series, ann: int = ANN) -> Dict[str, float]:
 
 
 def tsmom_backtest(price_data: Dict[str, pd.DataFrame], cfg: TSMOMConfig = None,
-                   close_col: str = "close") -> Dict[str, Any]:
+                   close_col: str = "close",
+                   carry_panel: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
     """Vectorized, mark-to-market, lookahead-free multi-asset trend-following backtest.
 
     Returns strategy metrics, buy-hold SPY and 60/40 benchmarks (when available),
     the equity curve, per-asset weight/return panels, turnover and correlation to SPY.
+    Pass ``carry_panel`` (+ ``cfg.carry_weight`` > 0) to blend in the carry sleeve.
     """
     cfg = cfg or TSMOMConfig()
-    W, F, R = build_weights(price_data, cfg, close_col)
+    W, F, R = build_weights(price_data, cfg, close_col, carry_panel=carry_panel)
 
     held = W.shift(1).fillna(0.0)                       # act next bar (no lookahead)
     gross_ret = (held * R).sum(axis=1)
@@ -277,14 +295,15 @@ def run_both_directions(price_data: Dict[str, pd.DataFrame], cfg: TSMOMConfig = 
 # Live signal                                                                  #
 # --------------------------------------------------------------------------- #
 def live_target_weights(price_data: Dict[str, pd.DataFrame], cfg: TSMOMConfig = None,
-                        close_col: str = "close") -> pd.DataFrame:
+                        close_col: str = "close",
+                        carry_panel: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     """Today's target weights per asset, from the SAME pipeline as the backtest.
 
     The last (un-shifted) weight row is what you would execute next session. Returns
     a DataFrame indexed by symbol with columns: forecast, realized_vol, target_weight.
     """
     cfg = cfg or TSMOMConfig()
-    W, F, R = build_weights(price_data, cfg, close_col)
+    W, F, R = build_weights(price_data, cfg, close_col, carry_panel=carry_panel)
     closes = _aligned_closes(price_data, close_col)
     V = pd.DataFrame({sym: realized_vol(closes[sym], cfg.vol_lookback, cfg.ann_factor, cfg.vol_floor_blend) for sym in closes})
     return pd.DataFrame({

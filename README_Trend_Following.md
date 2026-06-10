@@ -145,13 +145,38 @@ real-data windows. Rejections are documented because they are findings:
 | Donchian breakout in ensemble | 0.65 → 0.73 | 0.63 → 0.69 | ✅ adopted |
 | +5 ETFs (UUP/SLV/HYG/UNG/TIP) | 0.73 → 0.72 | — | ❌ rejected (noise, worse DD) |
 | +6 FX majors (Yahoo spot) | 0.75 → 0.57 | 0.71 → 0.57 | ❌ rejected (FX trend weak post-2008, dilutes book) |
-| Bond carry (10y−3m spread, 35% blend on TLT/IEF) | 0.75 → 0.74 | 0.71 → 0.73 | ❌ rejected (mixed; carry on 2/13 assets is noise) |
+| Full multi-asset carry sleeve (10/13 assets) | 0.75 → 0.66 (cw .25) | 0.71 → 0.73 | ❌ rejected (drawdown −24%→−43%) |
 
-A proper multi-asset **carry sleeve** remains the best-evidenced extension, but it
-requires data that isn't freely available here: FX forwards/rate differentials,
-commodity futures curves, or crypto funding rates (Binance futures API is
-geo-blocked in this environment; FRED is unreachable; no FMP API key). With a paid
-or accessible data source for any of those, carry is the first thing to revisit.
+### The carry sleeve (built, measured, rejected — kept as infrastructure)
+
+A *proper* multi-asset carry sleeve is now fully implemented
+(`carry.py`, `carry_data.py`) with real data:
+
+- **Rates** (bond term-structure carry, and the cash rate for equity carry):
+  Yahoo `^TNX`/`^IRX` back to 2007 — equivalent to FRED T10Y3M, no API key.
+- **Equity carry**: trailing-12m dividend yield − 3m cash rate (yfinance dividends).
+- **Crypto carry**: −(annualized perpetual funding), live from OKX with a Deribit
+  fallback (Binance futures are geo-blocked here).
+
+Carry forecasts use the same causal scaling as trend and are blended into the book
+*before* vol targeting, so the two sleeves share one risk budget. Coverage reached
+**10 of 13 assets** (all equities, both bonds, both crypto; only DBC/USO/GLD lack a
+free carry signal). Result, per the both-windows adoption rule:
+
+| | 12y Sharpe | 19y Sharpe | 12y maxDD | 19y maxDD |
+|--|-----------|-----------|-----------|-----------|
+| trend only | 0.75 | 0.71 | −24% | −24% |
+| +carry 0.25 | 0.66 | 0.73 | −29% | −29% |
+| +carry 0.50 | 0.52 | 0.73 | −43% | −43% |
+
+**Rejected.** It fails the 12y window outright and, even where Sharpe nudges up
+(19y), drawdown nearly doubles. Realized vol stays near the 15% target, so this is
+not a sizing bug — it is carry's well-documented **negative skew / "carry crash"**
+behaviour (Koijen et al.): naive carry is short-volatility and crash-prone, the
+*opposite* of trend's crisis alpha, so blending it in dilutes the very property
+that makes this strategy worth holding. `carry_weight` defaults to **0**. Combining
+carry with trend usefully needs more than a linear blend (per-sleeve risk parity
+with a crash/regime overlay) — a real research project, not a parameter.
 
 ## Honest bottom line
 
