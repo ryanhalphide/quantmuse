@@ -27,24 +27,25 @@ package.
 
 | Subpackage | Public classes | Status |
 |-----------|----------------|--------|
-| `fetchers` | `BinanceFetcher`, `AlphaVantageFetcher`, `YahooFetcher`* | ⚠️ see §9 |
-| `processors` | `DataProcessor` (returns `MarketAnalysis`) | ❌ package `__init__` broken — §9.1 |
-| `factors` | `FactorCalculator`, `FactorScreener`, `StockSelector`, `FactorBacktest`, `FactorOptimizer` | ⚠️ needs `matplotlib` |
-| `strategies` | `StrategyBase`, `StrategyRegistry`, `StrategyRunner`, `StrategyOptimizer`, 5 builtins | ⚠️ needs `scipy` |
-| `backtest` | `BacktestEngine`, `PerformanceAnalyzer` | ⚠️ needs `matplotlib` |
+| `fetchers` | `BinanceFetcher`, `AlphaVantageFetcher`, `YahooFetcher` | ✅ |
+| `processors` | `DataProcessor` (returns `MarketAnalysis`) | ✅ |
+| `factors` | `FactorCalculator`, `FactorScreener`, `StockSelector`, `FactorBacktest`, `FactorOptimizer` | ✅ |
+| `strategies` | `StrategyBase`, `StrategyRegistry`, `StrategyRunner`, `StrategyOptimizer`, 5 builtins | ✅ |
+| `backtest` | `BacktestEngine`, `PerformanceAnalyzer` | ✅ |
 | `ai` | `LLMIntegration`, `NLPProcessor`, `SentimentAnalyzer`, `NewsProcessor`, `SocialMediaMonitor`, `SentimentFactorCalculator`, `LangChainAgent` | ✅ (needs `ai` extra for full features) |
-| `ml` | `MLModelManager`, `PredictionModel`, `ClassificationModel`, `FeatureEngineer` | ⚠️ 4 advertised submodules missing — §9.4 |
+| `ml` | `MLModelManager`, `PredictionModel`, `ClassificationModel`, `FeatureEngineer` | ✅ (needs scikit-learn) |
 | `storage` | `DatabaseManager`, `FileStorage`, `CacheManager` | ✅ |
-| `visualization` | `PlotlyChartGenerator` | ⚠️ 3 advertised submodules missing — §9.4 |
+| `visualization` | `PlotlyChartGenerator` | ✅ (needs plotly) |
 | `web` | `APIServer` (FastAPI), `WebDashboard`, `StrategyUI` | ⚠️ needs `web`+`visualization` extras |
 | `dashboard` | `TradingDashboard` (Streamlit), `ChartGenerator`, `DashboardWidgets` | ⚠️ needs `streamlit` |
-| `realtime` | `WebSocketClient`, `RealTimeDataFeed` | ⚠️ 2 advertised submodules missing — §9.4 |
-| `vector_db` | `VectorStore` | ❌ package `__init__` broken — §9.2 |
-| `api` | `APIManager` | ❌ package `__init__` broken — §9.2 |
+| `realtime` | `WebSocketClient`, `RealTimeDataFeed` | ✅ (needs `realtime` extra to run) |
+| `vector_db` | `VectorStore` | ✅ |
+| `api` | `APIManager` | ✅ |
 | `utils` | `DataFetchError`, `ProcessingError`, `ValidationError`, `setup_logger` | ✅ |
 
-\* `YahooFetcher` exists but is **not** exported by `fetchers/__init__.py` — import
-it from its module path (see §5).
+> The import bugs originally cataloged in §9 of this guide have been **fixed**
+> (see §9 for the record of what changed). Every subpackage above now imports
+> cleanly once its dependencies are installed.
 
 ---
 
@@ -63,16 +64,13 @@ pip install -e ".[realtime]"     # websockets, aiohttp, asyncio-mqtt, redis
 pip install -e ".[test]"         # pytest, pytest-cov, pytest-asyncio
 ```
 
-> **Heads-up on undeclared deps (see §9.3):** `factors` and `backtest` import
-> `matplotlib` at module load, but `matplotlib` only lives in the `visualization`
-> extra — so install that extra before using factors/backtesting. The
-> `strategies` package needs `scipy`, which is **not declared anywhere**; install
-> it manually: `pip install scipy`.
+`matplotlib`, `seaborn`, and `scipy` are declared in the base `install_requires`
+(factors/backtest/strategies import them at module load).
 
 A "make everything importable" install:
 
 ```bash
-pip install -e ".[ai,visualization,web,realtime,test]" scipy
+pip install -e ".[ai,visualization,web,realtime,test]"
 ```
 
 ---
@@ -95,12 +93,11 @@ vector store) works without filling anything in.
 
 ## 4. The 60-second quick start (no API keys)
 
-`DataProcessor` is the simplest end-to-end feature. **Today it requires the
-one-line fix in §9.1 first** (`processors/__init__.py` is broken). After that:
+`DataProcessor` is the simplest end-to-end feature:
 
 ```python
 import pandas as pd, numpy as np
-from data_service.processors import DataProcessor   # works after §9.1 fix
+from data_service.processors import DataProcessor
 
 # Any OHLCV DataFrame indexed by timestamp with columns open/high/low/close/volume
 idx = pd.date_range("2024-01-01", periods=300, freq="D")
@@ -116,8 +113,8 @@ print(analysis.signals)             # golden_cross, rsi overbought/oversold, mac
 
 `process_market_data` returns a `MarketAnalysis` dataclass with three dicts:
 `indicators` (each a `pd.Series`), `statistics` (floats), and `signals` (bools).
-*(Verified: the processor logic runs correctly; only the package `__init__` blocks
-the import.)*
+Invalid input (empty frame, missing OHLCV columns) raises
+`data_service.utils.exceptions.ProcessingError`.
 
 ---
 
@@ -126,7 +123,7 @@ the import.)*
 ### Yahoo Finance — ✅ no key required
 
 ```python
-from data_service.fetchers.yahoo_fetcher import YahooFetcher  # NOT re-exported by the package
+from data_service.fetchers import YahooFetcher
 from datetime import datetime, timedelta
 
 yf = YahooFetcher()
@@ -143,21 +140,21 @@ fins  = yf.get_financial_data("AAPL")   # balance_sheet / income_statement / cas
 > `fetch_historical_data` takes `start_time` / `end_time` / `interval` — there is
 > **no** `period=` argument.
 
-### Binance — ⚠️ key optional, but see §9.5/§9.6
+### Binance — ✅ key optional for public endpoints
 
 ```python
-from data_service.fetchers.binance_fetcher import BinanceFetcher
+from data_service.fetchers import BinanceFetcher
 f = BinanceFetcher(api_key=None, api_secret=None)         # public endpoints need no key
 klines = f.fetch_historical_data("BTCUSD", interval="1h", limit=500)
+price  = f.get_current_price("BTCUSD")                    # float, latest trade price
 book   = f.get_order_book("BTCUSD", limit=100)            # {'bids': [...], 'asks': [...]}
+depth  = f.get_market_depth("BTCUSD", limit=5)            # alias of get_order_book
 trades = f.get_recent_trades("BTCUSD", limit=100)
 ```
 
-Real methods: `fetch_historical_data`, `get_order_book`, `get_recent_trades`,
-`start_websocket`/`stop_websocket`. There is **no** `get_current_price` or
-`get_market_depth` despite what README/`main.py`/`examples/fetch_public_data.py`
-claim (§9.5). Also note the websocket import is broken on modern `python-binance`
-(§9.6).
+`start_websocket(symbol, callback)` / `stop_websocket(symbol)` stream 1-minute
+klines; the implementation supports both modern `python-binance`
+(`ThreadedWebsocketManager`) and the legacy `BinanceSocketManager` API.
 
 ### Alpha Vantage — ⚠️ requires a free key
 
@@ -171,7 +168,7 @@ inc = av.get_income_statement("AAPL")      # also get_balance_sheet / get_cash_f
 
 ---
 
-## 6. Factor analysis (`data_service.factors`) — ⚠️ `pip install matplotlib scipy`
+## 6. Factor analysis (`data_service.factors`)
 
 ```python
 from data_service.factors import (
@@ -208,7 +205,7 @@ provides `run_multi_factor_backtest`, `calculate_information_coefficient`,
 
 ---
 
-## 7. Strategy framework (`data_service.strategies`) — ⚠️ `pip install scipy matplotlib`
+## 7. Strategy framework (`data_service.strategies`)
 
 Strategies subclass `StrategyBase` and implement
 `generate_signals(factor_data, price_data, **kwargs) -> StrategyResult`. Five
@@ -259,7 +256,7 @@ parameters. See `examples/extensible_strategy_demo.py` and
 
 ---
 
-## 8. Backtesting (`data_service.backtest`) — ⚠️ `pip install matplotlib`
+## 8. Backtesting (`data_service.backtest`)
 
 `BacktestEngine.run_backtest(data, strategy_func, strategy_params=None)`. The
 strategy is a **callback** invoked once as `strategy_func(data, engine, **params)`;
@@ -290,38 +287,36 @@ report = PerformanceAnalyzer().analyze_performance(results)
 print(PerformanceAnalyzer().generate_report(report))
 ```
 
-> README shows `run_backtest(strategy, historical_data)` — that argument order and
-> shape is wrong (§9.7). Use `run_backtest(data, strategy_func, params)`.
+> README still shows `run_backtest(strategy, historical_data)` — that argument order
+> is wrong. Use `run_backtest(data, strategy_func, params)`.
 
 ---
 
-## 9. Known gaps & bugs (verified empirically)
+## 9. Known gaps & bugs — status: **fixed**
 
-| # | Severity | Symptom | Fix |
-|---|----------|---------|-----|
-| 9.1 | High | `import data_service.processors` → `ImportError: cannot import name 'ProcessedData'`. Makes `DataProcessor` unreachable and top-level `data_service.DataProcessor` `None`. | In `processors/__init__.py` replace `ProcessedData` with `MarketAnalysis` (the real class name). |
-| 9.2 | High | `import data_service.api` and `import data_service.vector_db` raise `ModuleNotFoundError` (unguarded imports of files that don't exist). | Trim each `__init__.py`/`__all__` to the shipped module (`APIManager`; `VectorStore`), or implement the missing files. |
-| 9.3 | High | `import data_service.factors`/`.backtest` → `No module named 'matplotlib'`; `import data_service.strategies` → `No module named 'scipy'`. | Add `matplotlib`/`seaborn` to base `install_requires` (or make the imports lazy) and add `scipy` to deps. |
-| 9.4 | Medium | `ml`, `realtime`, `visualization` advertise submodules that don't ship (`deep_learning`, `ensemble_models`, `model_evaluation`, `optimization`; `tick_processor`, `market_data_stream`; `matplotlib_charts`, `real_time_charts`, `dashboard_charts`). Imports are guarded so the names silently become `None`. | Trim `__all__` to what ships, or implement the missing modules. |
-| 9.5 | Medium | `BinanceFetcher.get_current_price()` / `get_market_depth()` are called by README, `main.py`, `examples/fetch_public_data.py` but **don't exist** → `AttributeError`. | Add thin wrappers (e.g. `get_current_price` via `client.get_symbol_ticker`; `get_market_depth` aliasing `get_order_book`) or fix the callers to the real method names. |
-| 9.6 | Medium | `binance_fetcher.py` does `from binance.websockets import BinanceSocketManager`, removed in modern `python-binance`; `fetchers/__init__` then sets `BinanceFetcher=None`. | Update to `binance.streams`/`ThreadedWebsocketManager`, or pin `python-binance<1.0`. |
-| 9.7 | Low | Top-level `from .fetchers import ... YahooFetcher ...` fails because `YahooFetcher` isn't exported by `fetchers/__init__.py`; the guarded block then sets **all three** fetchers to `None`, so `main.py`'s top-level imports are dead. | Export `YahooFetcher` in `fetchers/__init__.py`. |
-| 9.8 | Low | README backtest snippet uses `run_backtest(strategy, data)`; real signature is `run_backtest(data, strategy_func, params)`. | Update README, or use §8 above. |
+The bugs this section originally cataloged have been fixed in the codebase:
 
-### Import model & workaround
+| # | Was | Fix applied |
+|---|-----|-------------|
+| 9.1 | `processors/__init__.py` imported nonexistent `ProcessedData` → package unimportable. | Imports/`__all__` now use the real class `MarketAnalysis`. |
+| 9.2 | `api`/`vector_db` `__init__` did unguarded imports of files that don't exist → `ModuleNotFoundError`. | Trimmed to the shipped modules (`APIManager`; `VectorStore`). |
+| 9.3 | `matplotlib`/`seaborn`/`scipy` imported at module load by factors/backtest/strategies but not in base deps. | Added to `install_requires` in `setup.py`. |
+| 9.4 | `ml`, `realtime`, `visualization` advertised submodules that don't ship; names silently became `None`. | `__init__`/`__all__` trimmed to what ships. (The missing submodules remain unimplemented — roadmap items, not bugs.) |
+| 9.5 | `BinanceFetcher.get_current_price()`/`get_market_depth()` called by README/`main.py`/examples but missing. | Both added (`get_symbol_ticker` wrapper; `get_order_book` alias). |
+| 9.6 | `from binance.websockets import ...` fails on modern `python-binance` → `BinanceFetcher = None`. | Import now tries `ThreadedWebsocketManager` (≥1.0) with legacy fallback; `start_websocket` supports both APIs. |
+| 9.7 | `YahooFetcher` not exported by `fetchers/__init__` → top-level guarded import killed **all three** fetchers. | Exported (guarded). |
+| 9.8 | Top-level/`web` imports of nonexistent `Logger`/`TradingException` (the latter silently disabled **all** of `api_server`'s trading-module imports). | Top-level re-exports `setup_logger` + real exception classes; dead import removed from `api_server.py`. |
+| 9.9 | `PerformanceAnalyzer` used pandas frequency aliases `'M'`/`'Y'`, removed in pandas 2.2+ → `analyze_performance` raised `ValueError`. | Changed to `'ME'`/`'YE'`. |
+| 9.10 | `tests/test_binance_fetcher.py` patched `binance.client.Client`, not the name the fetcher holds — mocks never applied and tests hit the real Binance API. `DataProcessor` raised `ValueError` where tests expect `ProcessingError`. | Patch target corrected; `DataProcessor` validation now raises `ProcessingError`. |
 
-Because of 9.1/9.3, prefer **module-path imports** for the affected packages until
-the fixes land, and install `matplotlib`+`scipy`:
-
-```python
-from data_service.fetchers.yahoo_fetcher import YahooFetcher      # ✅ works today
-from data_service.storage.database_manager import DatabaseManager # ✅ works today
-# processors/factors/backtest/strategies: apply §9.1/§9.3 fixes first
-```
-
-`data_service` (top-level) imports fine; but most top-level re-exported names
-(`DataProcessor`, all fetchers, `BacktestEngine`, factor classes) resolve to `None`
-because of the issues above — import from the subpackage/module instead.
+Remaining genuinely-unimplemented features (advertised in older docs, no code):
+`ml.deep_learning` / `ensemble_models` / `model_evaluation` / `optimization`,
+`realtime.tick_processor` / `market_data_stream`,
+`visualization.matplotlib_charts` / `real_time_charts` / `dashboard_charts`,
+`api.api_documentation` / `api_testing` / `api_gateway`,
+`vector_db.embedding_manager` / `search_engine` / `document_processor`.
+README's backtest snippet still shows `run_backtest(strategy, data)`; the real
+signature is `run_backtest(data, strategy_func, params)` (see §8).
 
 ---
 
@@ -367,9 +362,8 @@ best_name, best_result = mgr.get_best_model(metric="validation_score")
 ```
 
 `ClassificationModel` mirrors `PredictionModel` with `predict_proba`. Models
-support `save_model`/`load_model`. *(The `model_evaluation`, `ensemble_models`,
-`deep_learning`, `optimization` submodules advertised in `ml/__init__.py` are not
-implemented — §9.4.)*
+support `save_model`/`load_model`. *(`model_evaluation`, `ensemble_models`,
+`deep_learning`, `optimization` are roadmap items — see §9/§20.)*
 
 ---
 
@@ -402,7 +396,7 @@ g.export_chart(fig, "chart.html", format="html")       # or 'png' (needs kaleido
 ```
 
 (`MatplotlibChartGenerator`, `RealTimeChartManager`, `DashboardChartGenerator`
-are advertised but not implemented — §9.4.)
+are roadmap items — see §9/§20.)
 
 ---
 
@@ -420,7 +414,7 @@ last = feed.get_latest_tick("BTCUSDT")
 
 `WebSocketClient(exchange="binance")` is the lower-level client with
 `add_message_handler` / `add_error_handler`. See `demo_charts_websocket.py`.
-(`TickProcessor`, `MarketDataStream` are advertised but not implemented — §9.4.)
+(`TickProcessor`, `MarketDataStream` are roadmap items — see §9/§20.)
 
 ---
 
@@ -455,7 +449,6 @@ python run_dashboard.py          # serves http://localhost:8501
 ## 16. Vector store & API manager
 
 ```python
-# ❌ apply §9.2 first, then:
 from data_service.vector_db.vector_store import VectorStore, VectorDocument
 vs = VectorStore(db_path="vector_store.db")
 vs.create_collection("research")
@@ -470,8 +463,7 @@ resp = api.make_request("quotes", )              # built-in caching, retry, metr
 
 `VectorStore` is a self-contained sqlite-backed vector store (collections,
 add/get/search/delete/export). `APIManager` is a generic HTTP client with caching,
-retry logic, and performance metrics. *(The other classes advertised in these two
-packages' `__init__` files are not implemented — §9.2.)*
+retry logic, and performance metrics.
 
 ---
 
@@ -500,9 +492,9 @@ python examples/langchain_llm_demo.py       # needs .[ai] + OpenAI key
 demo_charts_websocket.py / demo_llm_nlp_simple.py / test_nlp_effect.py
 ```
 
-> `main.py` and `examples/fetch_public_data.py` call the non-existent Binance
-> methods from §9.5 and rely on the broken top-level imports from §9.1/§9.7 — they
-> will not run until those fixes are applied.
+> `main.py` and `examples/fetch_public_data.py` use `get_current_price` /
+> `get_market_depth` and the top-level imports — all functional since the §9
+> fixes landed (network access to the exchanges still required, of course).
 
 ---
 
@@ -518,16 +510,15 @@ C++: `cd backend/build && ctest` (see §17).
 
 ---
 
-## 20. Suggested fix order (to make "everything works")
+## 20. Roadmap (the fixes from §9 are applied)
 
-1. **§9.1** one-line `processors/__init__.py` fix → unlocks the quick start.
-2. **§9.3** add `matplotlib`, `seaborn`, `scipy` to deps → unlocks factors,
-   backtest, strategies.
-3. **§9.2** trim `api/__init__.py` and `vector_db/__init__.py` to shipped modules.
-4. **§9.7** export `YahooFetcher` from `fetchers/__init__.py`.
-5. **§9.6 / §9.5** modernize the Binance websocket import and add the missing
-   `get_current_price`/`get_market_depth` (or fix callers).
-6. **§9.4** trim the `__all__` lists in `ml`/`realtime`/`visualization` to reality.
+All §9 fixes have landed; every subpackage imports cleanly and the test suite
+passes (21 passed, 1 intentionally skipped). What remains is net-new feature
+work, in rough value order:
 
-These are intentionally **not** applied in this guide (documentation-only change);
-each is small and independently shippable.
+1. Implement the advertised-but-missing submodules listed at the end of §9
+   (deep learning / ensemble ML, tick processing, matplotlib & real-time charts,
+   API gateway/docs/testing, embedding manager & search engine).
+2. Update the README code snippets to the real signatures (notably
+   `run_backtest(data, strategy_func, params)`).
+3. Wire the C++ engine to the Python package (currently independent).
