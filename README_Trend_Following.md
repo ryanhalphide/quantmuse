@@ -134,6 +134,25 @@ never shorts, controlled trending-basket profitability, cost monotonicity,
 different start dates, walk-forward/sensitivity structure, Binance pagination,
 tz alignment, live-vs-backtest consistency, and the core+trend blend.
 
+## Improvement log (adopted and rejected)
+
+Each candidate was adopted only if it improved Sharpe in BOTH the 12y and 19y
+real-data windows. Rejections are documented because they are findings:
+
+| Candidate | 12y Sharpe | 19y Sharpe | Verdict |
+|-----------|-----------|-----------|---------|
+| Position buffering (0.15 band) | 0.62 → 0.65 | — | ✅ adopted (turnover −28%) |
+| Donchian breakout in ensemble | 0.65 → 0.73 | 0.63 → 0.69 | ✅ adopted |
+| +5 ETFs (UUP/SLV/HYG/UNG/TIP) | 0.73 → 0.72 | — | ❌ rejected (noise, worse DD) |
+| +6 FX majors (Yahoo spot) | 0.75 → 0.57 | 0.71 → 0.57 | ❌ rejected (FX trend weak post-2008, dilutes book) |
+| Bond carry (10y−3m spread, 35% blend on TLT/IEF) | 0.75 → 0.74 | 0.71 → 0.73 | ❌ rejected (mixed; carry on 2/13 assets is noise) |
+
+A proper multi-asset **carry sleeve** remains the best-evidenced extension, but it
+requires data that isn't freely available here: FX forwards/rate differentials,
+commodity futures curves, or crypto funding rates (Binance futures API is
+geo-blocked in this environment; FRED is unreachable; no FMP API key). With a paid
+or accessible data source for any of those, carry is the first thing to revisit.
+
 ## Honest bottom line
 
 This is the first strategy in the project with a **positive, robust,
