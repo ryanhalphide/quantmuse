@@ -169,14 +169,33 @@ free carry signal). Result, per the both-windows adoption rule:
 | +carry 0.25 | 0.66 | 0.73 | −29% | −29% |
 | +carry 0.50 | 0.52 | 0.73 | −43% | −43% |
 
-**Rejected.** It fails the 12y window outright and, even where Sharpe nudges up
-(19y), drawdown nearly doubles. Realized vol stays near the 15% target, so this is
-not a sizing bug — it is carry's well-documented **negative skew / "carry crash"**
-behaviour (Koijen et al.): naive carry is short-volatility and crash-prone, the
-*opposite* of trend's crisis alpha, so blending it in dilutes the very property
-that makes this strategy worth holding. `carry_weight` defaults to **0**. Combining
-carry with trend usefully needs more than a linear blend (per-sleeve risk parity
-with a crash/regime overlay) — a real research project, not a parameter.
+**Linear blend: rejected.** It fails the 12y window outright and, even where Sharpe
+nudges up (19y), drawdown nearly doubles. Realized vol stays near the 15% target,
+so this is not a sizing bug — it is carry's well-documented **negative skew / "carry
+crash"** (Koijen et al.): naive carry is short-volatility and crash-prone, the
+*opposite* of trend's crisis alpha.
+
+#### Doing it properly: regime-gated risk-parity combination
+
+`trend_carry_backtest` / `build_combined_weights` combine the sleeves the right way:
+each sleeve is vol-targeted **independently** (risk parity), carry is **gated down
+in high-volatility regimes** (`_regime_gate`: when the anchor's short-horizon vol is
+historically extreme — exactly when carry crashes and trend earns its crisis alpha),
+then the total is re-targeted. This **materially mitigates the carry crash**:
+
+| | 12y Sharpe / maxDD | 19y Sharpe / maxDD |
+|--|--------------------|--------------------|
+| trend only | **0.75** / −24% | 0.71 / −24% |
+| linear blend cw0.5 | 0.52 / −43% | 0.73 / −43% |
+| gated risk-parity cw0.5 | 0.60 / −33% | **0.78** / −35% |
+
+The gate recovers a lot (12y 0.52→0.60, drawdown −43%→−33%) and over the 19y sample
+gated carry **beats trend-only on Sharpe** (0.71→0.78). But it still **fails the
+strict both-windows rule**: in the trend-friendly 2014–2026 decade it trails
+standalone trend, and drawdown stays meaningfully worse in both windows (carry's
+skew can be reduced, not vol-targeted away). So **`carry_weight` defaults to 0** and
+the gated combination is the documented, supported way to *opt in* to the carry
+premium over long horizons. Full machinery + 13 tests retained as infrastructure.
 
 ## Honest bottom line
 

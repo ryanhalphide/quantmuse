@@ -4,7 +4,10 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 
-from data_service.strategies.trend_following import TSMOMConfig, tsmom_backtest, build_weights
+from data_service.strategies.trend_following import (
+    TSMOMConfig, tsmom_backtest, build_weights, build_combined_weights,
+    trend_carry_backtest, _regime_gate,
+)
 from data_service.strategies.carry import bond_carry, equity_carry, crypto_carry, build_carry_panel
 
 
@@ -85,6 +88,57 @@ class TestCarryIntegration(unittest.TestCase):
         res = tsmom_backtest(data, TSMOMConfig(carry_weight=0.3), carry_panel=C)
         self.assertIn("sharpe", res["strategy"])
         self.assertEqual(len(res["equity_curve"]), len(next(iter(data.values()))))
+
+
+class TestRegimeGatedCombination(unittest.TestCase):
+    def _data_with_spy_vol_shift(self, n_calm=220, n_wild=120):
+        rng = np.random.RandomState(7)
+        calm = 0.004 * rng.randn(n_calm)
+        wild = 0.030 * rng.randn(n_wild)
+        rets = np.concatenate([calm, wild])
+        idx = pd.date_range("2016-01-01", periods=len(rets), freq="B")
+        spy = pd.DataFrame({"close": 100 * np.cumprod(1 + rets)}, index=idx)
+        data = {"SPY": spy}
+        for i in range(3):
+            data[f"A{i}"] = _trending_df(n=len(rets), seed=10 + i, start="2016-01-01")
+        return data
+
+    def test_gate_bounds_and_drops_in_stress(self):
+        data = self._data_with_spy_vol_shift()
+        closes = pd.DataFrame({s: df["close"] for s, df in data.items()})
+        gate = _regime_gate(closes, TSMOMConfig())
+        self.assertTrue(((gate >= -1e-9) & (gate <= 1 + 1e-9)).all())
+        # Average gate during the volatile tail is below the calm start.
+        self.assertLess(gate.iloc[-60:].mean(), gate.iloc[80:200].mean())
+
+    def test_combined_backtest_runs(self):
+        data = self._data_with_spy_vol_shift()
+        idx = pd.DataFrame({s: df["close"] for s, df in data.items()}).index
+        C = pd.DataFrame({"A0": 1.0, "A1": -1.0}, index=idx)
+        res = trend_carry_backtest(data, C, TSMOMConfig(carry_weight=0.5))
+        self.assertTrue(res.get("combined"))
+        self.assertIn("sharpe", res["strategy"])
+
+    def test_combined_no_lookahead(self):
+        data = self._data_with_spy_vol_shift()
+        idx = pd.DataFrame({s: df["close"] for s, df in data.items()}).index
+        C = pd.DataFrame({"A0": 1.0, "A1": -1.0}, index=idx)
+        cfg = TSMOMConfig(carry_weight=0.5)
+        full = build_combined_weights(data, cfg, C)[0]
+        k = 250
+        trunc = {s: df.iloc[:k] for s, df in data.items()}
+        part = build_combined_weights(trunc, cfg, C.iloc[:k])[0]
+        a = full.iloc[:k].reset_index(drop=True)
+        b = part.reset_index(drop=True)
+        self.assertLess(float((a - b).abs().to_numpy().max()), 1e-9)
+
+    def test_gate_toggle_changes_result(self):
+        data = self._data_with_spy_vol_shift()
+        idx = pd.DataFrame({s: df["close"] for s, df in data.items()}).index
+        C = pd.DataFrame({"A0": 1.0, "A1": -1.0}, index=idx)
+        on = build_combined_weights(data, TSMOMConfig(carry_weight=1.0, carry_vol_gate=True), C)[0]
+        off = build_combined_weights(data, TSMOMConfig(carry_weight=1.0, carry_vol_gate=False), C)[0]
+        self.assertFalse(np.allclose(on.values, off.values))
 
 
 class TestCarryData(unittest.TestCase):

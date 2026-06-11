@@ -48,6 +48,8 @@ try:
         realized_vol,
         build_weights,
         tsmom_backtest,
+        trend_carry_backtest,
+        build_combined_weights,
         run_both_directions,
         live_target_weights,
     )
@@ -57,6 +59,8 @@ except ImportError:
     realized_vol = None
     build_weights = None
     tsmom_backtest = None
+    trend_carry_backtest = None
+    build_combined_weights = None
     run_both_directions = None
     live_target_weights = None
 
@@ -97,6 +101,8 @@ __all__ += [
     'realized_vol',
     'build_weights',
     'tsmom_backtest',
+    'trend_carry_backtest',
+    'build_combined_weights',
     'run_both_directions',
     'live_target_weights',
     'load_universe',

@@ -57,6 +57,9 @@ class TSMOMConfig:
     buffer_fraction: float = 0.15      # no-trade band (fraction of target) to cut turnover
     vol_floor_blend: float = 0.3       # blend realized vol with its long-run mean (Carver floor)
     carry_weight: float = 0.0          # 0..1 blend of the carry sleeve into the book
+    carry_vol_gate: bool = True        # stand carry down in high-vol regimes (carry-crash guard)
+    carry_vol_gate_threshold: float = 0.7  # anchor-vol percentile above which carry ramps off
+    carry_gate_floor: float = 0.0      # minimum carry scaling at peak stress
     direction: str = "long_short"      # or "long_flat"
     cost_bps: float = 5.0              # transaction cost per unit turnover, bps
     initial_capital: float = 100_000.0
@@ -237,18 +240,9 @@ def _metrics(r: pd.Series, eq: pd.Series, ann: int = ANN) -> Dict[str, float]:
     return {"ann_return": ann_return, "ann_vol": vol, "sharpe": sharpe, "max_drawdown": max_dd}
 
 
-def tsmom_backtest(price_data: Dict[str, pd.DataFrame], cfg: TSMOMConfig = None,
-                   close_col: str = "close",
-                   carry_panel: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
-    """Vectorized, mark-to-market, lookahead-free multi-asset trend-following backtest.
-
-    Returns strategy metrics, buy-hold SPY and 60/40 benchmarks (when available),
-    the equity curve, per-asset weight/return panels, turnover and correlation to SPY.
-    Pass ``carry_panel`` (+ ``cfg.carry_weight`` > 0) to blend in the carry sleeve.
-    """
-    cfg = cfg or TSMOMConfig()
-    W, F, R = build_weights(price_data, cfg, close_col, carry_panel=carry_panel)
-
+def _backtest_from_weights(W: pd.DataFrame, F: pd.DataFrame, R: pd.DataFrame,
+                           cfg: TSMOMConfig) -> Dict[str, Any]:
+    """Shared mark-to-market accounting for a finished weight panel."""
     held = W.shift(1).fillna(0.0)                       # act next bar (no lookahead)
     gross_ret = (held * R).sum(axis=1)
     turnover = (held - held.shift(1)).abs().sum(axis=1).fillna(held.abs().sum(axis=1))
@@ -269,7 +263,6 @@ def tsmom_backtest(price_data: Dict[str, pd.DataFrame], cfg: TSMOMConfig = None,
         "direction": cfg.direction,
         "config": cfg,
     }
-
     if "SPY" in R.columns:
         spy_ret = R["SPY"].fillna(0.0)
         out["benchmark_spy"] = _metrics(spy_ret, (1.0 + spy_ret).cumprod(), cfg.ann_factor)
@@ -278,6 +271,85 @@ def tsmom_backtest(price_data: Dict[str, pd.DataFrame], cfg: TSMOMConfig = None,
         if "TLT" in R.columns:
             r6040 = (0.6 * R["SPY"] + 0.4 * R["TLT"]).fillna(0.0)
             out["benchmark_6040"] = _metrics(r6040, (1.0 + r6040).cumprod(), cfg.ann_factor)
+    return out
+
+
+def tsmom_backtest(price_data: Dict[str, pd.DataFrame], cfg: TSMOMConfig = None,
+                   close_col: str = "close",
+                   carry_panel: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
+    """Vectorized, mark-to-market, lookahead-free multi-asset trend-following backtest.
+
+    Returns strategy metrics, buy-hold SPY and 60/40 benchmarks (when available),
+    the equity curve, per-asset weight/return panels, turnover and correlation to SPY.
+    Pass ``carry_panel`` (+ ``cfg.carry_weight`` > 0) to linearly blend in carry; for
+    the regime-gated risk-parity combination use ``trend_carry_backtest`` instead.
+    """
+    cfg = cfg or TSMOMConfig()
+    W, F, R = build_weights(price_data, cfg, close_col, carry_panel=carry_panel)
+    return _backtest_from_weights(W, F, R, cfg)
+
+
+def _regime_gate(closes: pd.DataFrame, cfg: TSMOMConfig, anchor: str = "SPY",
+                 span: int = 21) -> pd.Series:
+    """Carry-on/off gate in [floor, 1]: full size in calm markets, ramping toward a
+    floor when the anchor's short-horizon volatility is historically extreme.
+
+    Carry is short-volatility (it crashes in stress), so we stand it down exactly
+    when its tail risk is highest -- which is also when trend earns its crisis
+    alpha. Causal: volatility percentile is expanding and shifted by one day.
+    """
+    if anchor not in closes.columns:
+        return pd.Series(1.0, index=closes.index)
+    vol = realized_vol(closes[anchor], span, cfg.ann_factor)
+    rank = vol.expanding(min_periods=60).rank(pct=True)
+    thr = cfg.carry_vol_gate_threshold
+    ramp = ((rank - thr) / (1.0 - thr)).clip(0.0, 1.0)        # 0 below thr -> 1 at top
+    gate = 1.0 - (1.0 - cfg.carry_gate_floor) * ramp
+    return gate.shift(1).fillna(1.0)
+
+
+def build_combined_weights(price_data: Dict[str, pd.DataFrame], cfg: TSMOMConfig,
+                           carry_panel: pd.DataFrame, close_col: str = "close",
+                           ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Combine trend and carry as independent, vol-targeted (risk-parity) sleeves,
+    with carry gated down in high-volatility regimes, then re-target the total.
+
+    Unlike the linear pre-target blend in ``build_weights`` (which imports carry's
+    drawdowns wholesale), each sleeve is first scaled to the portfolio vol target on
+    its own, carry is multiplied by the regime gate, the two are added with carry
+    weighted by ``cfg.carry_weight``, and the sum is re-targeted so total risk stays
+    at the vol target. All steps are causal.
+    """
+    closes = _aligned_closes(price_data, close_col)
+    R = closes.pct_change()
+    Rf = R.fillna(0.0)
+    F = pd.DataFrame({s: compute_forecast_series(closes[s].dropna(), cfg) for s in closes}).reindex(closes.index)
+    V = pd.DataFrame({s: realized_vol(closes[s], cfg.vol_lookback, cfg.ann_factor, cfg.vol_floor_blend) for s in closes})
+
+    Wt = pd.DataFrame({s: _position_from_forecast(F[s], V[s], cfg) for s in closes})
+    Wt = Wt.where(F.notna() & V.notna(), 0.0).fillna(0.0)
+    Wt = _apply_portfolio_vol_target(Wt, Rf, cfg)            # trend sleeve at target vol
+
+    C = carry_panel.reindex(index=closes.index, columns=closes.columns)
+    Wc = pd.DataFrame({s: _position_from_forecast(C[s], V[s], cfg) for s in closes})
+    Wc = Wc.where(C.notna() & V.notna(), 0.0).fillna(0.0)
+    Wc = _apply_portfolio_vol_target(Wc, Rf, cfg)            # carry sleeve at target vol
+    if cfg.carry_vol_gate:
+        Wc = Wc.mul(_regime_gate(closes, cfg), axis=0)       # stand carry down in stress
+
+    W = Wt + cfg.carry_weight * Wc
+    W = _apply_portfolio_vol_target(W, Rf, cfg)              # re-target the total
+    W = _apply_buffer(W, cfg.buffer_fraction)
+    return W, F, R
+
+
+def trend_carry_backtest(price_data: Dict[str, pd.DataFrame], carry_panel: pd.DataFrame,
+                         cfg: TSMOMConfig = None, close_col: str = "close") -> Dict[str, Any]:
+    """Backtest the regime-gated risk-parity trend+carry combination."""
+    cfg = cfg or TSMOMConfig()
+    W, F, R = build_combined_weights(price_data, cfg, carry_panel, close_col)
+    out = _backtest_from_weights(W, F, R, cfg)
+    out["combined"] = True
     return out
 
 
