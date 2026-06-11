@@ -11,8 +11,9 @@ class TestBinanceFetcher(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures"""
-        # Create patchers
-        self.client_patcher = patch('binance.client.Client')
+        # Patch the name the fetcher module actually holds (it does
+        # `from binance.client import Client`), otherwise tests hit the real API
+        self.client_patcher = patch('data_service.fetchers.binance_fetcher.Client')
         self.requests_patcher = patch('binance.client.requests.get')
         
         # Start patchers

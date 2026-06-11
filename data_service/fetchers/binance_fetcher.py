@@ -1,5 +1,12 @@
 from binance.client import Client
-from binance.websockets import BinanceSocketManager
+try:
+    # python-binance >= 1.0
+    from binance import ThreadedWebsocketManager as _WebsocketManager
+    _MODERN_WS = True
+except ImportError:
+    # python-binance < 1.0
+    from binance.websockets import BinanceSocketManager as _WebsocketManager
+    _MODERN_WS = False
 from datetime import datetime
 import pandas as pd
 import logging
@@ -18,6 +25,8 @@ class BinanceFetcher:
         """
         self.logger = logging.getLogger(__name__)
         try:
+            self.api_key = api_key
+            self.api_secret = api_secret
             self.client = Client(api_key, api_secret, tld='us')
             self.bm = None  # WebSocket管理器
             self.ws_connections = {}  # 存储WebSocket连接
@@ -84,12 +93,9 @@ class BinanceFetcher:
         :param callback: 处理实时数据的回调函数
         """
         try:
-            if not self.bm:
-                self.bm = BinanceSocketManager(self.client)
-            
             # 创建K线数据连接
             conn_key = f"{symbol.lower()}@kline_1m"
-            
+
             def handle_socket_message(msg):
                 try:
                     if msg['e'] == 'kline':
@@ -105,15 +111,28 @@ class BinanceFetcher:
                         callback(data)
                 except Exception as e:
                     self.logger.error(f"Error processing websocket message: {str(e)}")
-            
-            self.ws_connections[conn_key] = self.bm.start_kline_socket(
-                symbol=symbol,
-                callback=handle_socket_message,
-                interval='1m'
-            )
-            
-            # 启动WebSocket
-            self.bm.start()
+
+            if _MODERN_WS:
+                if not self.bm:
+                    self.bm = _WebsocketManager(
+                        api_key=self.api_key, api_secret=self.api_secret, tld='us'
+                    )
+                    self.bm.start()  # must be running before sockets are added
+                self.ws_connections[conn_key] = self.bm.start_kline_socket(
+                    callback=handle_socket_message,
+                    symbol=symbol,
+                    interval='1m'
+                )
+            else:
+                if not self.bm:
+                    self.bm = _WebsocketManager(self.client)
+                self.ws_connections[conn_key] = self.bm.start_kline_socket(
+                    symbol=symbol,
+                    callback=handle_socket_message,
+                    interval='1m'
+                )
+                self.bm.start()
+
             self.logger.info(f"WebSocket started for {symbol}")
             
         except Exception as e:
@@ -148,6 +167,28 @@ class BinanceFetcher:
         except Exception as e:
             self.logger.error(f"Error fetching order book: {str(e)}")
             raise DataFetchError(f"Failed to fetch order book: {str(e)}")
+
+    def get_current_price(self, symbol: str = "BTCUSD") -> float:
+        """
+        获取当前价格
+        :param symbol: 交易对
+        :return: 最新成交价
+        """
+        try:
+            ticker = self.client.get_symbol_ticker(symbol=symbol)
+            return float(ticker['price'])
+        except Exception as e:
+            self.logger.error(f"Error fetching current price: {str(e)}")
+            raise DataFetchError(f"Failed to fetch current price: {str(e)}")
+
+    def get_market_depth(self, symbol: str = "BTCUSD", limit: int = 100) -> Dict:
+        """
+        获取市场深度 (get_order_book 的别名, 兼容旧调用方)
+        :param symbol: 交易对
+        :param limit: 订单簿深度
+        :return: 订单簿数据
+        """
+        return self.get_order_book(symbol=symbol, limit=limit)
 
     def get_recent_trades(self, symbol: str = "BTCUSD", limit: int = 100) -> pd.DataFrame:
         """

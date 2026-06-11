@@ -17,7 +17,12 @@ setup(
         'redis',
         'requests',
         'textblob',
-        'openpyxl'
+        'openpyxl',
+        # factors/backtest import matplotlib+seaborn and strategies imports
+        # scipy at module load, so they must be base deps
+        'matplotlib>=3.5.0',
+        'seaborn>=0.11.0',
+        'scipy'
     ],
     extras_require={
         'test': [
