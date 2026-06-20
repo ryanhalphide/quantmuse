@@ -140,6 +140,10 @@ data/
 *.xlsx
 *.json
 !config.example.json
+# Paper-trading ledger is intentionally tracked (strategy targets + prices only, no broker data)
+!paper_trades/ledger.csv
+# Example portfolio snapshot (dummy data) is tracked; real snapshots stay under data/
+!examples/portfolio_snapshot.example.json
 
 # Logs
 logs/

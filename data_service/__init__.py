@@ -1,11 +1,12 @@
 # Core modules
 try:
-    from .fetchers import AlphaVantageFetcher, YahooFetcher, BinanceFetcher
+    from .fetchers import AlphaVantageFetcher, YahooFetcher, BinanceFetcher, KalshiFetcher
 except ImportError:
     # Handle missing dependencies gracefully
     AlphaVantageFetcher = None
     YahooFetcher = None
     BinanceFetcher = None
+    KalshiFetcher = None
 
 try:
     from .processors import DataProcessor
@@ -56,14 +57,23 @@ except ImportError:
     StockSelector = None
     FactorOptimizer = None
 
+# Signal providers
+try:
+    from .signals import SignalProvider, SignalResult, AlphaVantageSignalProvider
+except ImportError:
+    SignalProvider = None
+    SignalResult = None
+    AlphaVantageSignalProvider = None
+
 __version__ = "0.1.0"
 
 __all__ = [
     # Data fetchers
     'AlphaVantageFetcher',
-    'YahooFetcher', 
+    'YahooFetcher',
     'BinanceFetcher',
-    
+    'KalshiFetcher',
+
     # Data processors
     'DataProcessor',
     
@@ -96,5 +106,10 @@ __all__ = [
     'FactorScreener',
     'FactorBacktest',
     'StockSelector',
-    'FactorOptimizer'
+    'FactorOptimizer',
+
+    # Signal providers
+    'SignalProvider',
+    'SignalResult',
+    'AlphaVantageSignalProvider'
 ] 

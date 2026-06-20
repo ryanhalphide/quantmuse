@@ -1,0 +1,12 @@
+{
+  "as_of": "2026-01-01",
+  "equity": 100000.0,
+  "positions": {
+    "SPY": 12.5,
+    "GLD": 30.0,
+    "TLT": 50.0
+  },
+  "crypto_value": 0.0,
+  "cash": 0.0,
+  "note": "Example only. Map current share counts for symbols in the strategy universe (SPY,QQQ,EFA,EEM,IWM,TLT,IEF,DBC,USO,GLD,VNQ,BTC,ETH). Real broker snapshots go to data/portfolio_snapshot.json (gitignored)."
+}
