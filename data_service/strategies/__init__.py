@@ -73,6 +73,21 @@ except ImportError:
     CRYPTO_UNIVERSE = None
 
 try:
+    from .paper_trade import (
+        rebalance_report,
+        record_targets,
+        mark_ledger,
+        load_snapshot,
+        save_snapshot,
+    )
+except ImportError:
+    rebalance_report = None
+    record_targets = None
+    mark_ledger = None
+    load_snapshot = None
+    save_snapshot = None
+
+try:
     from .carry import build_carry_panel, bond_carry, equity_carry, crypto_carry
 except ImportError:
     build_carry_panel = None
@@ -113,6 +128,11 @@ __all__ += [
     'bond_carry',
     'equity_carry',
     'crypto_carry',
+    'rebalance_report',
+    'record_targets',
+    'mark_ledger',
+    'load_snapshot',
+    'save_snapshot',
     'walk_forward',
     'parameter_sensitivity',
     'per_asset_contribution',

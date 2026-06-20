@@ -123,6 +123,25 @@ print(res["strategy"])              # Sharpe, vol, drawdown, ann return
 print(live_target_weights(data))    # today's target weights
 ```
 
+## Paper trading (read-only, order-free)
+
+`paper_trade.py` + `examples/paper_trade_demo.py` take the live strategy targets and
+a **portfolio snapshot** (`{equity, positions}`) and (1) print the trades that would
+reconcile your book to the targets, (2) log targets to a daily ledger, and (3) mark
+the ledger to market to track paper P&L. It is broker-agnostic and never places
+orders — populate the snapshot from any broker (the Robinhood MCP is wired to do
+this) or use `--notional` for pure simulation.
+
+```bash
+python examples/paper_trade_demo.py --mode long_flat --record
+python examples/paper_trade_demo.py --carry --snapshot data/portfolio_snapshot.json
+```
+
+`long_flat` is the realistic deployable for a cash account (no shorting). Real
+broker snapshots/ledgers live under `data/` (gitignored); see
+`examples/portfolio_snapshot.example.json` for the format. **No live orders are ever
+placed without explicit, separate authorization.**
+
 ## Testing
 
 ```bash
