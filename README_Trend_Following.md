@@ -142,6 +142,17 @@ broker snapshots/ledgers live under `data/` (gitignored); see
 `examples/portfolio_snapshot.example.json` for the format. **No live orders are ever
 placed without explicit, separate authorization.**
 
+### Durable daily loop
+
+`.github/workflows/paper_trade.yml` runs the strategy every weekday (22:30 UTC, after
+the US close), appends targets to `paper_trades/ledger.csv`, marks the ledger to
+market, and commits it — fully unattended, no broker connection, fixed notional, so
+nothing sensitive runs in CI. The committed ledger is the durable paper-trading
+record (it survives the ephemeral dev container). Scheduled runs fire from the
+default branch once merged; trigger it any time via **Run workflow**
+(`workflow_dispatch`). The broker rebalance report (vs your real positions) stays a
+read-only, on-demand step run from a session with the brokerage MCP.
+
 ## Testing
 
 ```bash

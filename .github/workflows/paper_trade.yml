@@ -1,0 +1,52 @@
+name: Daily paper trade
+
+# Durable, unattended daily paper-trading of the trend strategy.
+# Records the strategy's target weights + prices to paper_trades/ledger.csv and
+# marks the ledger to market, then commits the updated ledger. Uses a fixed
+# notional and NO broker connection, so nothing sensitive runs in CI.
+#
+# NOTE: scheduled runs only fire from the repository's DEFAULT branch, so the
+# daily cron activates once this is merged to main. Until then (and any time),
+# trigger it manually via the "Run workflow" button (workflow_dispatch).
+
+on:
+  schedule:
+    - cron: "30 22 * * 1-5"   # 22:30 UTC, weekdays (~after US market close)
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: paper-trade
+  cancel-in-progress: false
+
+jobs:
+  paper-trade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install pandas numpy yfinance requests
+      - name: Record + mark paper trades
+        run: |
+          PYTHONPATH=. python examples/paper_trade_demo.py \
+            --mode long_flat --years 6 --record \
+            --ledger paper_trades/ledger.csv \
+            --snapshot /nonexistent --notional 100000
+      - name: Commit ledger if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f paper_trades/ledger.csv
+          if git diff --staged --quiet; then
+            echo "No ledger change."
+          else
+            git commit -m "Daily paper-trade ledger update [skip ci]"
+            git push origin HEAD:${{ github.ref_name }}
+          fi
