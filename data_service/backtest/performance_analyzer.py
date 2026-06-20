@@ -215,13 +215,13 @@ class PerformanceAnalyzer:
         # Calculate daily returns
         equity_curve['returns'] = equity_curve['total_value'].pct_change()
         
-        # Monthly returns
-        monthly_returns = equity_curve['returns'].resample('M').apply(
+        # Monthly returns ('ME'/'YE': pandas 2.2+ replaced the 'M'/'Y' aliases)
+        monthly_returns = equity_curve['returns'].resample('ME').apply(
             lambda x: (1 + x).prod() - 1
         )
-        
+
         # Yearly returns
-        yearly_returns = equity_curve['returns'].resample('Y').apply(
+        yearly_returns = equity_curve['returns'].resample('YE').apply(
             lambda x: (1 + x).prod() - 1
         )
         
@@ -298,7 +298,7 @@ class PerformanceAnalyzer:
         axes[1, 0].grid(True)
         
         # Monthly returns heatmap
-        monthly_returns = returns.resample('M').apply(lambda x: (1 + x).prod() - 1)
+        monthly_returns = returns.resample('ME').apply(lambda x: (1 + x).prod() - 1)
         monthly_returns_pivot = monthly_returns.groupby([monthly_returns.index.year, 
                                                        monthly_returns.index.month]).first()
         monthly_returns_pivot = monthly_returns_pivot.unstack()

@@ -21,10 +21,12 @@ except ImportError:
     CacheManager = None
 
 try:
-    from .utils import Logger, TradingException
+    from .utils import setup_logger, DataFetchError, ProcessingError, ValidationError
 except ImportError:
-    Logger = None
-    TradingException = None
+    setup_logger = None
+    DataFetchError = None
+    ProcessingError = None
+    ValidationError = None
 
 # AI modules
 try:
@@ -81,8 +83,10 @@ __all__ = [
     'CacheManager',
     
     # Utilities
-    'Logger',
-    'TradingException',
+    'setup_logger',
+    'DataFetchError',
+    'ProcessingError',
+    'ValidationError',
     
     # AI modules
     'SentimentAnalyzer',

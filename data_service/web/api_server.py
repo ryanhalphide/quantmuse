@@ -24,7 +24,6 @@ try:
     from ..ai import LLMIntegration, NLPProcessor, SentimentFactorCalculator
     from ..fetchers import YahooFetcher, BinanceFetcher
     from ..storage import DatabaseManager
-    from ..utils import Logger
 except ImportError as e:
     logging.error(f"Failed to import trading modules: {e}")
 
