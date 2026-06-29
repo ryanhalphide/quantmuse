@@ -7,12 +7,37 @@ common calendar so the vectorized backtest can join cleanly.
 """
 
 import logging
+import os
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+# On-disk price cache: makes loads resilient to transient Yahoo rate limits and
+# fast on reruns. Gitignored (under data/). Falls back to cache when a live fetch
+# returns empty; refreshes the cache whenever a live fetch succeeds.
+CACHE_DIR = os.environ.get("TREND_CACHE_DIR", os.path.join("data", "cache"))
+
+
+def _cache_get(symbol: str, interval: str) -> Optional[pd.DataFrame]:
+    path = os.path.join(CACHE_DIR, f"{symbol}_{interval}.pkl")
+    if os.path.exists(path):
+        try:
+            return pd.read_pickle(path)
+        except Exception:
+            return None
+    return None
+
+
+def _cache_put(symbol: str, interval: str, df: pd.DataFrame) -> None:
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        df.to_pickle(os.path.join(CACHE_DIR, f"{symbol}_{interval}.pkl"))
+    except Exception as e:
+        logger.warning("cache write failed for %s: %s", symbol, e)
 
 # Diversified, liquid, free-to-fetch universe.
 ETF_UNIVERSE: List[str] = [
@@ -43,10 +68,19 @@ def _normalize(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _fetch_yahoo(symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
+def _fetch_yahoo(symbol: str, start: datetime, end: datetime, retries: int = 4) -> pd.DataFrame:
     from ..fetchers.yahoo_fetcher import YahooFetcher
-    df = YahooFetcher().fetch_historical_data(symbol, start_time=start, end_time=end, interval="1d")
-    return _normalize(df) if df is not None and not df.empty else pd.DataFrame()
+    fetcher = YahooFetcher()
+    for attempt in range(retries):
+        try:
+            df = fetcher.fetch_historical_data(symbol, start_time=start, end_time=end, interval="1d")
+            if df is not None and not df.empty:
+                return _normalize(df)
+        except Exception as e:
+            logger.warning("Yahoo fetch error for %s (attempt %d): %s", symbol, attempt + 1, e)
+        if attempt < retries - 1:
+            time.sleep(2 ** attempt)  # 1s, 2s, 4s backoff for transient rate limits
+    return pd.DataFrame()
 
 
 def _make_binance_fetcher():
@@ -103,7 +137,13 @@ def load_universe(etfs: Optional[List[str]] = None,
     for sym in etfs:
         try:
             df = _fetch_yahoo(sym, start, end)
+            if df.empty:                       # transient rate limit -> fall back to cache
+                cached = _cache_get(sym, "1d")
+                if cached is not None and not cached.empty:
+                    logger.warning("Using cached data for ETF %s", sym)
+                    df = cached
             if not df.empty:
+                _cache_put(sym, "1d", df)
                 data[sym] = df
             else:
                 logger.warning("No data for ETF %s", sym)
@@ -112,7 +152,13 @@ def load_universe(etfs: Optional[List[str]] = None,
     for display, pair in crypto.items():
         try:
             df = _fetch_crypto(display, pair, start, end, prefer_binance)
+            if df.empty:
+                cached = _cache_get(display, "1d")
+                if cached is not None and not cached.empty:
+                    logger.warning("Using cached data for crypto %s", display)
+                    df = cached
             if not df.empty:
+                _cache_put(display, "1d", df)
                 data[display] = df
             else:
                 logger.warning("No data for crypto %s", display)

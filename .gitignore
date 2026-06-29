@@ -144,6 +144,10 @@ data/
 !paper_trades/ledger.csv
 # Example portfolio snapshot (dummy data) is tracked; real snapshots stay under data/
 !examples/portfolio_snapshot.example.json
+# Dashboard data is generated from the backtest and served by Vercel (no broker data)
+!frontend/data.json
+# Vercel config must be tracked
+!vercel.json
 
 # Logs
 logs/

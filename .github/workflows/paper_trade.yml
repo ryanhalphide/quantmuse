@@ -39,14 +39,16 @@ jobs:
             --mode long_flat --years 6 --record \
             --ledger paper_trades/ledger.csv \
             --snapshot /nonexistent --notional 100000
-      - name: Commit ledger if changed
+      - name: Regenerate dashboard data
+        run: PYTHONPATH=. python examples/export_dashboard_data.py
+      - name: Commit ledger + dashboard data if changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f paper_trades/ledger.csv
+          git add -f paper_trades/ledger.csv frontend/data.json
           if git diff --staged --quiet; then
-            echo "No ledger change."
+            echo "No change."
           else
-            git commit -m "Daily paper-trade ledger update [skip ci]"
+            git commit -m "Daily paper-trade ledger + dashboard update [skip ci]"
             git push origin HEAD:${{ github.ref_name }}
           fi
