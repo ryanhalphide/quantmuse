@@ -39,8 +39,8 @@ package.
 | `web` | `APIServer` (FastAPI), `WebDashboard`, `StrategyUI` | ⚠️ needs `web`+`visualization` extras |
 | `dashboard` | `TradingDashboard` (Streamlit), `ChartGenerator`, `DashboardWidgets` | ⚠️ needs `streamlit` |
 | `realtime` | `WebSocketClient`, `RealTimeDataFeed` | ✅ (needs `realtime` extra to run) |
-| `vector_db` | `VectorStore` | ✅ |
-| `api` | `APIManager` | ✅ |
+| `vector_db` | `VectorStore`, `EmbeddingManager`, `DocumentProcessor`, `SearchEngine` | ✅ |
+| `api` | `APIManager`, `APIDocumentation`, `APITesting`, `APIGateway` | ✅ |
 | `utils` | `DataFetchError`, `ProcessingError`, `ValidationError`, `setup_logger` | ✅ |
 
 > The import bugs originally cataloged in §9 of this guide have been **fixed**
@@ -309,14 +309,17 @@ The bugs this section originally cataloged have been fixed in the codebase:
 | 9.9 | `PerformanceAnalyzer` used pandas frequency aliases `'M'`/`'Y'`, removed in pandas 2.2+ → `analyze_performance` raised `ValueError`. | Changed to `'ME'`/`'YE'`. |
 | 9.10 | `tests/test_binance_fetcher.py` patched `binance.client.Client`, not the name the fetcher holds — mocks never applied and tests hit the real Binance API. `DataProcessor` raised `ValueError` where tests expect `ProcessingError`. | Patch target corrected; `DataProcessor` validation now raises `ProcessingError`. |
 
-Remaining genuinely-unimplemented features (advertised in older docs, no code):
-`ml.deep_learning` / `ensemble_models` / `model_evaluation` / `optimization`,
-`realtime.tick_processor` / `market_data_stream`,
-`visualization.matplotlib_charts` / `real_time_charts` / `dashboard_charts`,
-`api.api_documentation` / `api_testing` / `api_gateway`,
-`vector_db.embedding_manager` / `search_engine` / `document_processor`.
-README's backtest snippet still shows `run_backtest(strategy, data)`; the real
-signature is `run_backtest(data, strategy_func, params)` (see §8).
+**§20 roadmap progress** — the originally-missing submodules are being filled
+in across phased PRs:
+
+- ✅ `api.api_documentation` / `api_testing` / `api_gateway` — implemented (§16).
+- ✅ `vector_db.embedding_manager` / `search_engine` / `document_processor` —
+  implemented (§16).
+- ✅ README backtest/strategy/LLM snippet drift — fixed (see README + §7/§8).
+- ⏳ `ml.deep_learning` / `ensemble_models` / `model_evaluation` / `optimization`.
+- ⏳ `realtime.tick_processor` / `market_data_stream`.
+- ⏳ `visualization.matplotlib_charts` / `real_time_charts` / `dashboard_charts`.
+- ⏳ C++ engine ↔ Python bindings.
 
 ---
 
@@ -448,22 +451,75 @@ python run_dashboard.py          # serves http://localhost:8501
 
 ## 16. Vector store & API manager
 
-```python
-from data_service.vector_db.vector_store import VectorStore, VectorDocument
-vs = VectorStore(db_path="vector_store.db")
-vs.create_collection("research")
-vs.add_document(VectorDocument(...), )           # store text + embedding
-hits = vs.search_similar(query_embedding, )      # cosine similarity over stored vectors
+### Vector store + embeddings + search (`data_service.vector_db`)
 
-from data_service.api.api_manager import APIManager, APIEndpoint
-api = APIManager()
-api.register_endpoint("quotes", APIEndpoint(...))
-resp = api.make_request("quotes", )              # built-in caching, retry, metrics
+`VectorStore` is a self-contained sqlite-backed vector store. Around it,
+`EmbeddingManager` turns text into vectors, `DocumentProcessor` cleans/chunks/
+embeds raw text into `VectorDocument`s, and `SearchEngine` adds plain-text
+querying with optional reranking and metadata filters.
+
+```python
+from data_service.vector_db import (
+    VectorStore, EmbeddingManager, DocumentProcessor, SearchEngine
+)
+
+store = VectorStore(db_path="vector_store.db")
+# backend="auto" picks sentence-transformers > openai > a dependency-free
+# hash backend (great for offline/tests). Force one with backend="hash".
+em = EmbeddingManager(backend="auto")
+dp = DocumentProcessor(em)
+engine = SearchEngine(store, em)
+
+# Ingest: clean -> chunk (word windows w/ overlap) -> embed -> store
+dp.process_and_store(store, "Apple beats earnings; chip stocks rally...",
+                     source="news", metadata={"ticker": "AAPL"},
+                     collection="news")
+
+# Query with plain text (embeds the query for you)
+hits = engine.search("semiconductor rally", collection="news", top_k=5)
+hybrid = engine.hybrid_search("semiconductor rally", collection="news")  # + lexical rerank
+filtered = engine.search("rally", collection="news",
+                         metadata_filter={"ticker": "AAPL"})
+for doc, score in hits:
+    print(score, doc.source, doc.content[:60])
 ```
 
-`VectorStore` is a self-contained sqlite-backed vector store (collections,
-add/get/search/delete/export). `APIManager` is a generic HTTP client with caching,
-retry logic, and performance metrics.
+`EmbeddingManager`: `generate_embedding(text)`, `batch_embed(texts)`, built-in
+cache. `DocumentProcessor`: `clean_text`, `chunk_text(chunk_size, overlap)`,
+`process(...)`, `process_and_store(...)`. `SearchEngine`: `search`, `rerank`,
+`hybrid_search`.
+
+### API manager + docs + testing + gateway (`data_service.api`)
+
+`APIManager` is a generic HTTP client with caching, retry logic, rate limiting,
+and per-endpoint performance metrics. `APIDocumentation` introspects registered
+endpoints, `APITesting` runs test cases against them, and `APIGateway` adds a
+request/response middleware layer in front of `make_request`.
+
+```python
+from data_service.api import (
+    APIManager, APIEndpoint, APIDocumentation, APITesting, APITestCase, APIGateway
+)
+
+api = APIManager()
+api.register_endpoint("quotes", APIEndpoint(
+    name="quotes", url="https://example.com/quotes", method="GET",
+    headers={}, params={"symbol": "AAPL"}, rate_limit=60))
+
+# Auto-generate docs (Markdown or OpenAPI 3.0)
+APIDocumentation(api).export("api_docs.md", format="markdown")
+
+# Register and run endpoint tests
+tester = APITesting(api)
+tester.register_test(APITestCase("quotes-ok", "quotes", expected_status=200,
+                                 validator=lambda r: "price" in r.data))
+print(tester.generate_report())
+
+# Route through middleware (auth/logging/param injection)
+gw = APIGateway(api)
+gw.add_middleware(lambda name, params: {**params, "token": "secret"})
+resp = gw.route("quotes", {"symbol": "MSFT"})
+```
 
 ---
 
