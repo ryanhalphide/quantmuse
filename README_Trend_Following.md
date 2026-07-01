@@ -153,6 +153,25 @@ default branch once merged; trigger it any time via **Run workflow**
 (`workflow_dispatch`). The broker rebalance report (vs your real positions) stays a
 read-only, on-demand step run from a session with the brokerage MCP.
 
+## Dashboard (frontend)
+
+`frontend/` is a zero-build static dashboard (Chart.js) that visualizes the backtest
+and the live paper-trading record — deployable on Vercel with no framework
+(`vercel.json` serves `frontend/`). `examples/export_dashboard_data.py` runs the real
+backtest + marks the paper ledger and writes `frontend/data.json` (equity curves,
+crisis-alpha annual returns, the core+trend blend, current target weights, paper
+P&L). The daily GitHub Action regenerates and commits `data.json`, so the deployed
+dashboard stays current. It's read-only and shows backtest output — no broker, no
+orders.
+
+```bash
+python examples/export_dashboard_data.py   # -> frontend/data.json
+# open frontend/index.html (or deploy frontend/ on Vercel)
+```
+
+The loader (`trend_following_data.py`) now retries Yahoo with backoff and keeps a
+gitignored on-disk cache under `data/cache/`, so loads survive transient rate limits.
+
 ## Testing
 
 ```bash

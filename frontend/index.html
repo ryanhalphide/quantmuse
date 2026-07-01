@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuantMuse — Trend-Following Dashboard</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Diversified Trend-Following</h1>
+    <p class="sub">Time-series momentum with volatility targeting · backtest &amp; live paper-trading record</p>
+    <p class="meta" id="meta">Loading…</p>
+  </header>
+
+  <main>
+    <section id="cards" class="cards"></section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Growth of $1 — strategy vs benchmarks</h2>
+        <button id="logToggle" class="toggle">Log scale</button>
+      </div>
+      <div class="chart-wrap"><canvas id="equityChart"></canvas></div>
+    </section>
+
+    <section class="panel">
+      <h2>Crisis alpha — calendar-year return: trend vs SPY</h2>
+      <div class="chart-wrap"><canvas id="annualChart"></canvas></div>
+    </section>
+
+    <div class="two-col">
+      <section class="panel">
+        <h2>Trend as an overlay on buy-and-hold SPY</h2>
+        <table id="blendTable"></table>
+        <p class="note">Trend is ~uncorrelated to equities, so a blend lifts risk-adjusted return even when trend trails standalone in a bull market.</p>
+      </section>
+
+      <section class="panel">
+        <h2>Today's target weights <span class="tag">long/flat</span></h2>
+        <div class="chart-wrap small"><canvas id="weightsChart"></canvas></div>
+      </section>
+    </div>
+
+    <section class="panel" id="paperPanel">
+      <h2>Live paper-trading P&amp;L <span class="tag green">read-only</span></h2>
+      <div id="paperBody"></div>
+    </section>
+  </main>
+
+  <footer>
+    <p><strong>Backtest &amp; paper-trading only — not investment advice.</strong> No live orders are placed.
+    Results use free Yahoo/crypto data; past performance does not guarantee future results.</p>
+    <p class="meta" id="assets"></p>
+  </footer>
+
+  <script src="./app.js"></script>
+</body>
+</html>
