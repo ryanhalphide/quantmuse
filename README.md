@@ -191,37 +191,72 @@ print(f"BTC Price: ${btc_price:,.2f}")
 ```python
 from data_service.factors import FactorCalculator, FactorScreener
 
-# Calculate factors
+# Calculate factors for a symbol (prices/volumes are pandas Series)
 calculator = FactorCalculator()
 factors = calculator.calculate_all_factors(symbol, prices, volumes)
 
-# Screen stocks
-screener = FactorScreener()
-results = screener.create_momentum_screener().screen_stocks(factor_data)
+# Screen a cross-sectional factor table (rows = symbols, cols = factors)
+screener = FactorScreener().create_momentum_screener(min_momentum=10.0)
+results = screener.screen_stocks(factor_data)
 ```
 
-### Strategy Backtesting
+### Strategy Framework (cross-sectional stock selection)
+```python
+from data_service.strategies import StrategyRunner
+from data_service.strategies.builtin_strategies import register_builtin_strategies
+
+register_builtin_strategies()
+runner = StrategyRunner()
+# factor_data / price_data are cross-sectional DataFrames (rows = symbols)
+result = runner.run_strategy(
+    "MomentumStrategy", factor_data=factor_data, price_data=price_data,
+    parameters={"top_n": 20, "min_momentum": 5.0},
+)
+print(result.selected_stocks, result.weights)
+```
+
+### Strategy Backtesting (time-series)
 ```python
 from data_service.backtest import BacktestEngine
-from data_service.strategies import MomentumStrategy
 
-# Run backtest
+# The strategy is a callback invoked as strategy_func(data, engine, **params);
+# inside it you iterate over `data` and call engine.place_order(...).
+def sma_crossover(data, engine, fast=5, slow=20):
+    ma_fast = data["close"].rolling(fast).mean()
+    ma_slow = data["close"].rolling(slow).mean()
+    holding = False
+    for ts, row in data.iterrows():
+        if ma_fast.loc[ts] > ma_slow.loc[ts] and not holding:
+            qty = (engine.current_capital * 0.95) / row["close"]
+            holding = engine.place_order("SYM", "buy", qty, row["close"], ts)
+        elif ma_fast.loc[ts] < ma_slow.loc[ts] and holding:
+            pos = engine.get_current_positions().get("SYM")
+            if pos and engine.place_order("SYM", "sell", pos.quantity, row["close"], ts):
+                holding = False
+
 engine = BacktestEngine(initial_capital=100000)
-strategy = MomentumStrategy()
-results = engine.run_backtest(strategy, historical_data)
+results = engine.run_backtest(historical_data, sma_crossover, {"fast": 5, "slow": 20})
 ```
+
+> The **strategy framework** (`StrategyRunner`) selects a basket of stocks from
+> cross-sectional factor data; the **`BacktestEngine`** runs a time-series
+> callback over OHLCV data. They are different abstractions — see `USAGE.md`
+> §7–§8 for the full, verified guide.
 
 ### AI-Powered Analysis
 ```python
 from data_service.ai import LLMIntegration
 
-# Get AI insights
+# Get AI insights (market_data is an OHLCV DataFrame)
 llm = LLMIntegration(provider="openai")
-analysis = llm.analyze_market(factor_data, price_data)
+analysis = llm.analyze_market_data(market_data, symbols=["AAPL"])
 print(f"AI Recommendation: {analysis.content}")
 ```
 
 ## 📚 Documentation
+
+> 📖 **[USAGE.md](USAGE.md)** is the single, verified, runnable guide to every
+> module — every snippet there is checked against the real code signatures.
 
 ### Module Documentation
 - [📊 Factor Analysis](README_Factor_Analysis.md) - Multi-factor models and stock screening

@@ -1,6 +1,26 @@
 # 量化交易策略集合
 
-基于我们的量化因子分析框架，这里提供了8个实用的量化交易策略，涵盖不同的投资风格和风险偏好。
+基于我们的量化因子分析框架，这里提供了多个实用的量化交易策略，涵盖不同的投资风格和风险偏好。
+
+> **API 说明 / API note**: 策略框架是基于类的 (`StrategyBase` 的子类)，通过
+> `StrategyRunner` 运行。下面代码示例中的 `strategies.xxx_strategy(...)` 函数式调用
+> 并不存在 — 请使用下面的真实接口。当前内置 5 个策略并已注册：
+> `MomentumStrategy`、`ValueStrategy`、`QualityGrowthStrategy`、
+> `MultiFactorStrategy`、`MeanReversionStrategy`。其余策略 (低波动、行业轮动、
+> 风险平价) 为设计概念，尚未内置 — 可通过继承 `StrategyBase` 自行实现。
+> 完整可运行指南见 [`USAGE.md`](USAGE.md) §7。
+>
+> ```python
+> from data_service.strategies import StrategyRunner
+> from data_service.strategies.builtin_strategies import register_builtin_strategies
+>
+> register_builtin_strategies()          # 注册 5 个内置策略
+> runner = StrategyRunner()
+> # factor_data / price_data 为横截面 DataFrame (行 = 股票代码)
+> result = runner.run_strategy("MomentumStrategy", factor_data, price_data,
+>                              parameters={"top_n": 20, "min_momentum": 5.0})
+> print(result.selected_stocks, result.weights, result.performance_metrics)
+> ```
 
 ## 🎯 策略概览
 
@@ -38,10 +58,11 @@
 
 ```python
 # 动量策略示例
-momentum_result = strategies.momentum_strategy(
-    factor_data, price_data,
-    lookback_period=60,  # 60天动量
-    top_n=20            # 选择前20只股票
+momentum_result = runner.run_strategy(
+    "MomentumStrategy", factor_data, price_data,
+    parameters={"lookback_period": 60,  # 60天动量
+                "top_n": 20,            # 选择前20只股票
+                "min_momentum": 5.0}
 )
 ```
 
@@ -67,11 +88,12 @@ momentum_result = strategies.momentum_strategy(
 
 ```python
 # 价值策略示例
-value_result = strategies.value_strategy(
-    factor_data, price_data,
-    max_pe=15.0,        # P/E < 15
-    max_pb=2.0,         # P/B < 2
-    top_n=30            # 选择30只股票
+value_result = runner.run_strategy(
+    "ValueStrategy", factor_data, price_data,
+    parameters={"max_pe": 15.0,             # P/E < 15
+                "max_pb": 2.0,              # P/B < 2
+                "min_dividend_yield": 2.0,  # 股息率 > 2%
+                "top_n": 30}               # 选择30只股票
 )
 ```
 
@@ -97,10 +119,12 @@ value_result = strategies.value_strategy(
 
 ```python
 # 质量成长策略示例
-quality_result = strategies.quality_growth_strategy(
-    factor_data, price_data,
-    min_roe=15.0,       # ROE > 15%
-    min_growth=10.0     # 动量 > 10%
+quality_result = runner.run_strategy(
+    "QualityGrowthStrategy", factor_data, price_data,
+    parameters={"min_roe": 15.0,       # ROE > 15%
+                "min_growth": 10.0,    # 动量 > 10%
+                "max_debt_equity": 0.5,
+                "min_current_ratio": 1.5}
 )
 ```
 
@@ -135,9 +159,11 @@ factor_weights = {
     'market_cap': 0.15
 }
 
-multi_result = strategies.multi_factor_strategy(
-    factor_data, price_data,
-    factor_weights=factor_weights
+multi_result = runner.run_strategy(
+    "MultiFactorStrategy", factor_data, price_data,
+    parameters={"momentum_weight": 0.3, "value_weight": 0.2,
+                "quality_weight": 0.2, "volatility_weight": 0.15,
+                "size_weight": 0.15}
 )
 ```
 
@@ -163,10 +189,11 @@ multi_result = strategies.multi_factor_strategy(
 
 ```python
 # 均值回归策略示例
-reversion_result = strategies.mean_reversion_strategy(
-    factor_data, price_data,
-    rsi_oversold=30.0,      # RSI < 30
-    rsi_overbought=70.0     # RSI > 70
+reversion_result = runner.run_strategy(
+    "MeanReversionStrategy", factor_data, price_data,
+    parameters={"rsi_oversold": 30.0,      # RSI < 30
+                "rsi_overbought": 70.0,    # RSI > 70
+                "max_volatility": 40.0}
 )
 ```
 
@@ -190,13 +217,21 @@ reversion_result = strategies.mean_reversion_strategy(
 - 收益相对较低
 - 需要长期持有
 
+> ⚠️ **尚未内置 (Not yet a builtin)** — 低波动策略为设计概念，需自行实现。
+> 继承 `StrategyBase` 并实现 `generate_signals(factor_data, price_data)`，
+> 然后用 `StrategyRegistry().register_strategy(LowVolatilityStrategy)` 注册。
+
 ```python
-# 低波动策略示例
-low_vol_result = strategies.low_volatility_strategy(
-    factor_data, price_data,
-    max_volatility=15.0,    # 波动率 < 15%
-    min_dividend=1.5        # 股息率 > 1.5%
-)
+# 低波动策略 — 自定义实现骨架
+from data_service.strategies import StrategyBase, StrategyResult, StrategyRegistry
+
+class LowVolatilityStrategy(StrategyBase):
+    def __init__(self):
+        super().__init__("LowVolatilityStrategy", "选择低波动、高股息的防御股")
+    def generate_signals(self, factor_data, price_data, **kw) -> StrategyResult:
+        ...   # 基于 price_volatility / dividend_yield 因子筛选并加权
+
+StrategyRegistry().register_strategy(LowVolatilityStrategy)
 ```
 
 ### 7. 行业轮动策略 (Sector Rotation Strategy)
@@ -219,11 +254,18 @@ low_vol_result = strategies.low_volatility_strategy(
 - 需要宏观判断
 - 换手率很高
 
+> ⚠️ **尚未内置 (Not yet a builtin)** — 行业轮动策略为设计概念。需要额外的
+> 行业 (`sector`) 数据，可继承 `StrategyBase` 自行实现并注册。
+
 ```python
-# 行业轮动策略示例
-rotation_result = strategies.sector_rotation_strategy(
-    factor_data, price_data, sector_data
-)
+# 行业轮动策略 — 自定义实现骨架
+class SectorRotationStrategy(StrategyBase):
+    def __init__(self):
+        super().__init__("SectorRotationStrategy", "选择动量最强行业的龙头股")
+    def generate_signals(self, factor_data, price_data, **kw) -> StrategyResult:
+        ...   # 按行业聚合动量, 选 top 行业再选行业内 top 股票
+
+StrategyRegistry().register_strategy(SectorRotationStrategy)
 ```
 
 ### 8. 风险平价策略 (Risk Parity Strategy)
@@ -246,12 +288,18 @@ rotation_result = strategies.sector_rotation_strategy(
 - 需要精确计算
 - 调仓成本较高
 
+> ⚠️ **尚未内置 (Not yet a builtin)** — 风险平价策略为设计概念。可继承
+> `StrategyBase`，按波动率倒数分配权重，自行实现并注册。
+
 ```python
-# 风险平价策略示例
-parity_result = strategies.risk_parity_strategy(
-    factor_data, price_data,
-    target_volatility=10.0  # 目标波动率10%
-)
+# 风险平价策略 — 自定义实现骨架
+class RiskParityStrategy(StrategyBase):
+    def __init__(self):
+        super().__init__("RiskParityStrategy", "按风险贡献相等分配权重")
+    def generate_signals(self, factor_data, price_data, **kw) -> StrategyResult:
+        ...   # weight_i ∝ 1 / volatility_i, 归一化到目标组合波动率
+
+StrategyRegistry().register_strategy(RiskParityStrategy)
 ```
 
 ## 🚀 策略组合建议

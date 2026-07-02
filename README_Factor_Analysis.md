@@ -31,8 +31,10 @@ factor_backtest = FactorBacktest()
 # Calculate factors
 factors = factor_calculator.calculate_all_factors(symbol, prices, volumes, financial_data)
 
-# Screen stocks
-screener = factor_screener.create_momentum_screener()
+# Screen stocks (params optional; defaults shown)
+screener = factor_screener.create_momentum_screener(
+    min_momentum=10.0, min_volume_momentum=5.0
+)
 results = screener.screen_stocks(factor_data)
 
 # Backtest factor
