@@ -33,7 +33,7 @@ package.
 | `strategies` | `StrategyBase`, `StrategyRegistry`, `StrategyRunner`, `StrategyOptimizer`, 5 builtins | ✅ |
 | `backtest` | `BacktestEngine`, `PerformanceAnalyzer` | ✅ |
 | `ai` | `LLMIntegration`, `NLPProcessor`, `SentimentAnalyzer`, `NewsProcessor`, `SocialMediaMonitor`, `SentimentFactorCalculator`, `LangChainAgent` | ✅ (needs `ai` extra for full features) |
-| `ml` | `MLModelManager`, `PredictionModel`, `ClassificationModel`, `FeatureEngineer` | ✅ (needs scikit-learn) |
+| `ml` | `MLModelManager`, `PredictionModel`, `ClassificationModel`, `FeatureEngineer`, `ModelEvaluator`, `EnsembleModel`, `MLOptimizer`, `DeepLearningModel` | ✅ (needs scikit-learn; `DeepLearningModel` needs torch, in `.[ai]`) |
 | `storage` | `DatabaseManager`, `FileStorage`, `CacheManager` | ✅ |
 | `visualization` | `PlotlyChartGenerator` | ✅ (needs plotly) |
 | `web` | `APIServer` (FastAPI), `WebDashboard`, `StrategyUI` | ⚠️ needs `web`+`visualization` extras |
@@ -301,7 +301,7 @@ The bugs this section originally cataloged have been fixed in the codebase:
 | 9.1 | `processors/__init__.py` imported nonexistent `ProcessedData` → package unimportable. | Imports/`__all__` now use the real class `MarketAnalysis`. |
 | 9.2 | `api`/`vector_db` `__init__` did unguarded imports of files that don't exist → `ModuleNotFoundError`. | Trimmed to the shipped modules (`APIManager`; `VectorStore`). |
 | 9.3 | `matplotlib`/`seaborn`/`scipy` imported at module load by factors/backtest/strategies but not in base deps. | Added to `install_requires` in `setup.py`. |
-| 9.4 | `ml`, `realtime`, `visualization` advertised submodules that don't ship; names silently became `None`. | `__init__`/`__all__` trimmed to what ships. (The missing submodules remain unimplemented — roadmap items, not bugs.) |
+| 9.4 | `ml`, `realtime`, `visualization` advertised submodules that don't ship; names silently became `None`. | `__init__`/`__all__` trimmed to what ships at the time. `ml`'s submodules are now implemented (see roadmap below); `realtime`/`visualization`'s remain pending. |
 | 9.5 | `BinanceFetcher.get_current_price()`/`get_market_depth()` called by README/`main.py`/examples but missing. | Both added (`get_symbol_ticker` wrapper; `get_order_book` alias). |
 | 9.6 | `from binance.websockets import ...` fails on modern `python-binance` → `BinanceFetcher = None`. | Import now tries `ThreadedWebsocketManager` (≥1.0) with legacy fallback; `start_websocket` supports both APIs. |
 | 9.7 | `YahooFetcher` not exported by `fetchers/__init__` → top-level guarded import killed **all three** fetchers. | Exported (guarded). |
@@ -309,14 +309,17 @@ The bugs this section originally cataloged have been fixed in the codebase:
 | 9.9 | `PerformanceAnalyzer` used pandas frequency aliases `'M'`/`'Y'`, removed in pandas 2.2+ → `analyze_performance` raised `ValueError`. | Changed to `'ME'`/`'YE'`. |
 | 9.10 | `tests/test_binance_fetcher.py` patched `binance.client.Client`, not the name the fetcher holds — mocks never applied and tests hit the real Binance API. `DataProcessor` raised `ValueError` where tests expect `ProcessingError`. | Patch target corrected; `DataProcessor` validation now raises `ProcessingError`. |
 
-Remaining genuinely-unimplemented features (advertised in older docs, no code):
-`ml.deep_learning` / `ensemble_models` / `model_evaluation` / `optimization`,
-`realtime.tick_processor` / `market_data_stream`,
-`visualization.matplotlib_charts` / `real_time_charts` / `dashboard_charts`,
-`api.api_documentation` / `api_testing` / `api_gateway`,
-`vector_db.embedding_manager` / `search_engine` / `document_processor`.
-README's backtest snippet still shows `run_backtest(strategy, data)`; the real
-signature is `run_backtest(data, strategy_func, params)` (see §8).
+**§20 roadmap progress** — the originally-missing submodules are being filled
+in across phased PRs:
+
+- ✅ `ml.deep_learning` / `ensemble_models` / `model_evaluation` / `optimization` —
+  implemented (§11).
+- ⏳ `realtime.tick_processor` / `market_data_stream`.
+- ⏳ `visualization.matplotlib_charts` / `real_time_charts` / `dashboard_charts`.
+- ⏳ `api.api_documentation` / `api_testing` / `api_gateway`.
+- ⏳ `vector_db.embedding_manager` / `search_engine` / `document_processor`.
+- ⏳ README backtest/strategy/LLM snippet drift.
+- ⏳ C++ engine ↔ Python bindings.
 
 ---
 
@@ -350,20 +353,50 @@ sd = sa.analyze_text_sentiment("Great quarter for NVDA", symbol="NVDA")
 
 ```python
 from data_service.ml import MLModelManager, PredictionModel, FeatureEngineer
+from data_service.ml.ml_models import ModelConfig
 
 fe = FeatureEngineer()
 feats = fe.engineer_features(ohlcv_df)         # or create_technical_indicators / _lag_features / etc.
 
 mgr = MLModelManager()
 mgr.add_model("rf", PredictionModel(model_type="random_forest"))
-mgr.train_model("rf", X, y, validation_split=0.2)
+config = ModelConfig(model_type="random_forest", parameters={}, feature_columns=list(X.columns),
+                     target_column="y", test_size=0.2)
+mgr.train_model("rf", X, y, config)             # config is optional; a default is used if omitted
 preds = mgr.predict("rf", X_test)
 best_name, best_result = mgr.get_best_model(metric="validation_score")
 ```
 
 `ClassificationModel` mirrors `PredictionModel` with `predict_proba`. Models
-support `save_model`/`load_model`. *(`model_evaluation`, `ensemble_models`,
-`deep_learning`, `optimization` are roadmap items — see §9/§20.)*
+support `save_model`/`load_model`.
+
+```python
+from data_service.ml import ModelEvaluator, EnsembleModel, MLOptimizer, DeepLearningModel
+
+# Richer evaluation than MLModelManager's basic scores
+report = ModelEvaluator().evaluate(mgr.models["rf"], X_test, y_test, model_type="regression")
+print(report.metrics)                           # r2, mse, rmse, mae (+ roc_auc/confusion for classification)
+importances = ModelEvaluator().permutation_importance(mgr.models["rf"], X_test, y_test)
+
+# Combine several trained models into a weighted ensemble
+ensemble = EnsembleModel(model_type="regression")
+ensemble.add_model("rf", mgr.models["rf"], weight=2.0)
+ensemble.add_model("ridge", another_trained_model, weight=1.0)
+preds = ensemble.predict(X_test)                # weighted average (or weighted vote for classification)
+
+# Hyperparameter search over a wrapper's underlying sklearn estimator
+opt = MLOptimizer()
+result = opt.grid_search(PredictionModel(model_type="ridge"), {"alpha": [0.1, 1.0, 10.0]}, X, y)
+print(result.best_params, result.best_score)
+
+# Neural network models (needs torch: pip install -e ".[ai]") -- same
+# train/predict/save_model/load_model interface as PredictionModel
+dl = DeepLearningModel(architecture="mlp", task="regression", hidden_size=32, epochs=50)
+dl_result = dl.train(X, y)
+dl_preds = dl.predict(X_test)
+# architecture="lstm" trains over a sliding window of `sequence_length` past
+# rows instead -- predictions are shorter than the input by sequence_length.
+```
 
 ---
 
