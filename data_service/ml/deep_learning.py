@@ -9,6 +9,8 @@ MLModelManager and the rest of the ML pipeline unchanged.
 Requires torch (part of the `ai` extra: pip install -e ".[ai]").
 """
 
+from __future__ import annotations
+
 import logging
 from datetime import datetime
 from typing import Optional
