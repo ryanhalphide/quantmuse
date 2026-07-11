@@ -30,9 +30,33 @@ void OrderExecutor::submitOrder(std::shared_ptr<Order> order) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         order_queue_.push(order);
+        orders_[order->getOrderId()] = order;
     }
     cv_.notify_one();
     spdlog::info("Order submitted: {}", order->getOrderId());
+}
+
+void OrderExecutor::cancelOrder(const std::string& order_id) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = orders_.find(order_id);
+    if (it == orders_.end()) {
+        throw std::runtime_error("Unknown order id: " + order_id);
+    }
+    // The order may already have left order_queue_ for execution; executeOrder
+    // checks for this status and skips filling a cancelled order.
+    if (it->second->getStatus() == OrderStatus::PENDING) {
+        it->second->setStatus(OrderStatus::CANCELLED);
+        spdlog::info("Order cancelled: {}", order_id);
+    }
+}
+
+OrderStatus OrderExecutor::getOrderStatus(const std::string& order_id) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = orders_.find(order_id);
+    if (it == orders_.end()) {
+        throw std::runtime_error("Unknown order id: " + order_id);
+    }
+    return it->second->getStatus();
 }
 
 void OrderExecutor::executionLoop() {
@@ -55,6 +79,10 @@ void OrderExecutor::executionLoop() {
 }
 
 void OrderExecutor::executeOrder(std::shared_ptr<Order> order) {
+    if (order->getStatus() == OrderStatus::CANCELLED) {
+        spdlog::info("Skipping cancelled order: {}", order->getOrderId());
+        return;
+    }
     try {
         // 实现实际的订单执行逻辑
         order->setStatus(OrderStatus::FILLED);
@@ -66,4 +94,4 @@ void OrderExecutor::executeOrder(std::shared_ptr<Order> order) {
     }
 }
 
-} // namespace trading 
+} // namespace trading

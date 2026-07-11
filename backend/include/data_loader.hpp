@@ -2,8 +2,7 @@
 #include <string>
 #include <memory>
 #include <vector>
-#include <pybind11/pybind11.h>
-#include <pybind11/numpy.h>
+#include <functional>
 #include "common/types.hpp"
 
 namespace trading {
@@ -30,8 +29,10 @@ public:
     );
 
 private:
-    py::module data_service_;  // Python模块
-    py::object fetcher_;       // Python数据获取器实例
+    // Pimpl hides the pybind11/Python-embedding details (py::module, py::object)
+    // from this header, so consumers of DataLoader don't need Python.h in scope.
+    class Impl;
+    std::unique_ptr<Impl> pimpl_;
 };
 
-} // namespace trading 
+} // namespace trading

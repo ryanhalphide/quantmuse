@@ -17,11 +17,14 @@ Two cooperating layers:
 | Layer | Location | Purpose |
 |-------|----------|---------|
 | Python data/quant service | `data_service/` | Data fetching, processing, factor analysis, strategy framework, backtesting, AI/LLM/NLP, ML, storage, visualization, web & dashboard UIs |
-| C++ execution engine | `backend/` | Order executor, risk manager, strategy, data loader (CMake build, standalone) |
+| C++ execution engine | `backend/` | Order executor, risk manager, strategy (CMake build; bound to Python — see §17) |
 
-The Python package is named `data_service` (see `setup.py`). The two layers are
-independent today — there is no binding between the C++ engine and the Python
-package.
+The Python package is named `data_service` (see `setup.py`). The C++ engine's
+order executor, risk manager, and strategy classes are bound to Python via
+the optional `quantmuse_engine` extension (`data_service.engine`) — see §17
+for the build steps and `BacktestEngine.attach_cpp_risk_manager`/
+`attach_cpp_executor`. `data_loader`/`main.cpp` remain a separate, unbuilt,
+Python-embeds-in-C++ path unrelated to that binding (see §17).
 
 ### Module map (`data_service/`)
 
@@ -306,8 +309,8 @@ The bugs this section originally cataloged have been fixed in the codebase:
 | 9.9 | `PerformanceAnalyzer` used pandas frequency aliases `'M'`/`'Y'`, removed in pandas 2.2+ → `analyze_performance` raised `ValueError`. | Changed to `'ME'`/`'YE'`. |
 | 9.10 | `tests/test_binance_fetcher.py` patched `binance.client.Client`, not the name the fetcher holds — mocks never applied and tests hit the real Binance API. `DataProcessor` raised `ValueError` where tests expect `ProcessingError`. | Patch target corrected; `DataProcessor` validation now raises `ProcessingError`. |
 
-**§20 roadmap progress** — the originally-missing submodules have all landed;
-one item remains:
+**§20 roadmap progress** — every originally-missing submodule and the C++
+binding have landed:
 
 - ✅ `api.api_documentation` / `api_testing` / `api_gateway` — implemented (§16).
 - ✅ `vector_db.embedding_manager` / `search_engine` / `document_processor` —
@@ -318,7 +321,7 @@ one item remains:
 - ✅ `realtime.tick_processor` / `market_data_stream` — implemented (§14).
 - ✅ `ml.deep_learning` / `ensemble_models` / `model_evaluation` / `optimization` —
   implemented (§11).
-- ⏳ C++ engine ↔ Python bindings — the only remaining roadmap item; see §1.
+- ✅ C++ engine ↔ Python bindings — implemented; see §1 and §17.
 
 ---
 
@@ -594,16 +597,120 @@ resp = gw.route("quotes", {"symbol": "MSFT"})
 
 ---
 
-## 17. C++ execution engine (`backend/`)
+## 17. C++ execution engine (`backend/`) — bound to Python via `quantmuse_engine`
 
-Standalone CMake project — `order_executor`, `risk_manager`, `strategy`,
-`data_loader`, with tests under `backend/tests/`.
+The C++ engine is no longer standalone: `MarketData`, `Order`, `Position`,
+`Portfolio`, `RiskManager` (+ `RiskLimits`), `OrderExecutor`, and the
+`Strategy` hierarchy (Python can subclass `Strategy` directly) are exposed to
+Python as the `quantmuse_engine` pybind11 extension
+(`backend/src/bindings.cpp`), and `BacktestEngine` can use the C++
+`RiskManager`/`OrderExecutor` as drop-in components.
+
+> `data_loader.hpp`/`.cpp` and `main.cpp`/`TradingEngine` embed a Python
+> interpreter *inside* C++ (the opposite integration direction) and depend on
+> a `Config`/`Logger` subsystem that doesn't exist in this repo — that
+> standalone executable remains unbuildable and is unrelated to the bindings
+> below, which only need `common/types.hpp`, `order_executor`, `risk_manager`,
+> and `strategy`.
+
+### Build
 
 ```bash
-cd backend && mkdir -p build && cd build
-cmake .. && make
-ctest            # run C++ tests
+# Option A: drive the build through setup.py (copies the module to the repo root)
+QUANTMUSE_BUILD_CPP=1 pip install -e ".[cpp]"   # pybind11 + the CMake build
+
+# Option B: drive CMake directly
+cmake -B backend/build -DBUILD_PYTHON_MODULE=ON backend \
+      -Dpybind11_DIR="$(python -c 'import pybind11; print(pybind11.get_cmake_dir())')"
+cmake --build backend/build --target quantmuse_engine
+export PYTHONPATH="$PWD/backend/build:$PYTHONPATH"   # if not using option A's repo-root copy
 ```
+
+Needs a C++17 compiler, CMake ≥ 3.12, and dev packages for pybind11, spdlog,
+nlohmann-json, and Boost (`libspdlog-dev`, `nlohmann-json3-dev`,
+`libboost-system-dev` on Debian/Ubuntu).
+
+### C++ tests
+
+```bash
+cmake --build backend/build --target test_bindings
+ctest --test-dir backend/build --output-on-failure
+```
+
+`backend/tests/test_bindings.cpp` is a plain-assert smoke/regression suite
+(no gtest dependency) covering order lifecycle, portfolio valuation, risk
+gating, the threaded `OrderExecutor`, and `MovingAverageStrategy` — including
+a regression test for a real bug caught while wiring this up (§ below).
+
+### Python usage
+
+```python
+from data_service import engine
+from data_service.backtest import BacktestEngine
+
+assert engine.AVAILABLE   # False if the extension isn't built -- everything
+                          # else in data_service still works either way
+
+# C++ RiskManager gating real trades
+limits = engine.RiskLimits()
+limits.max_position_size = 0.1        # max 10% of portfolio per trade
+limits.max_leverage = 2.0
+limits.max_drawdown = 0.2
+limits.daily_loss_limit = 10_000
+limits.position_concentration = 0.3
+risk_manager = engine.RiskManager(limits)
+
+be = BacktestEngine(initial_capital=100_000)
+be.attach_cpp_risk_manager(risk_manager)   # rejects place_order() calls that violate limits
+be.attach_cpp_executor(engine.OrderExecutor())  # routes accepted trades through the C++ thread pool
+
+results = be.run_backtest(ohlcv_df, my_strategy_func)
+```
+
+`attach_cpp_risk_manager`: before each `place_order()` call, builds a
+snapshot `Portfolio` from the current Python positions/capital and calls
+`risk_manager.check_order_risk(order, portfolio)` — a rejection here rejects
+the Python order too, exactly like the existing insufficient-capital checks.
+`attach_cpp_executor`: every accepted trade is also submitted to the real
+threaded C++ `OrderExecutor` and its fill is awaited briefly (best-effort —
+logs a warning on timeout, doesn't roll back the Python-side bookkeeping that
+already accepted the trade).
+
+Subclass the abstract `Strategy` directly from Python (a pybind11 trampoline
+makes this work):
+
+```python
+class MyStrategy(engine.Strategy):
+    def initialize(self): ...
+    def on_market_data(self, data):   # data: engine.MarketData
+        return []                    # list[engine.Signal]
+    def on_order_update(self, order): ...
+```
+
+### Known gaps found and fixed while wiring this up
+
+Bugs below were caught empirically (via `RiskManager`/`OrderExecutor` never
+having been exercised end-to-end before this integration) and fixed:
+
+- `data_loader.hpp` declared raw `py::module`/`py::object` members but never
+  the `Impl`/`pimpl_` the matching `.cpp` already used (pimpl idiom
+  mismatch) — fixed by declaring the forward-declared `Impl` + `pimpl_`.
+- `order_executor.hpp` declared `cancelOrder`/`getOrderStatus` but neither
+  was ever implemented (undefined-reference at link time) — implemented,
+  backed by an order registry so status/cancellation work after an order
+  leaves the queue.
+- `risk_manager.cpp`'s `checkOrderRisk` locked `mutex_` and then called
+  `updateRiskMetrics` (which locks the same mutex again) — a guaranteed
+  self-deadlock on the first call. Fixed by switching to
+  `std::recursive_mutex`.
+- `risk_manager.cpp` referenced `current_prices_`/`updateCurrentPrices` that
+  weren't declared in the header, and `getRiskMetrics() const` locked a
+  non-`mutable` mutex — none of this compiled. Fixed in the header.
+- The position-concentration check always **added** the order quantity to
+  the existing position, even for a **sell** — so closing part of a position
+  looked like doubling it and got rejected. Fixed to use a signed BUY/SELL
+  delta (regression-tested in both `test_bindings.cpp` and
+  `test_engine_integration.py`).
 
 ---
 
