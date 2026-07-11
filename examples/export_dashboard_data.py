@@ -20,7 +20,7 @@ import pandas as pd
 
 from data_service.strategies.trend_following import TSMOMConfig, tsmom_backtest, _metrics, ANN
 from data_service.strategies.trend_following_data import load_universe, align_calendar
-from data_service.strategies.trend_following_robustness import core_plus_trend
+from data_service.strategies.trend_following_robustness import core_plus_trend, per_asset_contribution
 from data_service.strategies import paper_trade as pt
 
 OUT = os.path.join("frontend", "data.json")
@@ -96,6 +96,19 @@ def main():
                for s in w.index if abs(float(w[s])) > 1e-4]
     weights.sort(key=lambda x: x["weight"], reverse=True)
 
+    # Rolling 63-trading-day (~1 quarter) correlation of trend to SPY -- the
+    # diversification claim over time, not just the single full-sample number.
+    roll = ls["strat_returns"].rolling(63).corr(spy).dropna()
+    roll_w = roll.resample("W-FRI").last().dropna()
+    rolling_corr = {"dates": [d.strftime("%Y-%m-%d") for d in roll_w.index],
+                    "values": [round(float(v), 3) for v in roll_w.values]}
+
+    # Per-asset attribution: which sleeves actually drove the L/S result.
+    attrib_df = per_asset_contribution(ls)
+    attribution = [{"symbol": s, "total_contribution": round(float(row["total_contribution"]), 4),
+                    "sleeve_sharpe": (None if pd.isna(row["sleeve_sharpe"]) else round(float(row["sleeve_sharpe"]), 3))}
+                   for s, row in attrib_df.iterrows()]
+
     # Paper-trading P&L from the live ledger.
     paper = {"n_days": 0}
     marks = pt.mark_ledger(LEDGER)
@@ -122,6 +135,8 @@ def main():
         "annual": annual,
         "blend": blend,
         "weights": weights,
+        "rolling_corr": rolling_corr,
+        "attribution": attribution,
         "paper": paper,
     }
     os.makedirs(os.path.dirname(OUT), exist_ok=True)

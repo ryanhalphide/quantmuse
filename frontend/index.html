@@ -43,6 +43,20 @@
       </section>
     </div>
 
+    <div class="two-col">
+      <section class="panel">
+        <h2>Rolling correlation to SPY <span class="tag">63-day</span></h2>
+        <div class="chart-wrap small"><canvas id="rollingCorrChart"></canvas></div>
+        <p class="note">The diversification claim isn't a single number — this tracks it through time. Near zero throughout is the goal; sustained positive stretches would undercut the case for trend as an equity diversifier.</p>
+      </section>
+
+      <section class="panel">
+        <h2>Per-asset attribution <span class="tag">long/short</span></h2>
+        <div class="chart-wrap small"><canvas id="attributionChart"></canvas></div>
+        <p class="note">Cumulative return contribution by sleeve over the backtest window — confirms the result isn't carried by one asset.</p>
+      </section>
+    </div>
+
     <section class="panel" id="paperPanel">
       <h2>Live paper-trading P&amp;L <span class="tag green">read-only</span></h2>
       <div id="paperBody"></div>
