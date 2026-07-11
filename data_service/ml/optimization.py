@@ -13,6 +13,7 @@ import pandas as pd
 
 try:
     from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+    from sklearn.preprocessing import StandardScaler
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False
@@ -56,6 +57,11 @@ class MLOptimizer:
         scaler = getattr(model, "scaler", None)
         if scaler is not None:
             X_input = scaler.transform(X)
+        elif is_wrapper and getattr(model, "model", None) is None:
+            # Untrained wrapper: mirror ModelConfig's scale_features=True default
+            # (used by PredictionModel/ClassificationModel.train()) so the search
+            # scores the estimator under the same conditions it will actually run in.
+            X_input = StandardScaler().fit_transform(X)
         return estimator, X_input
 
     def grid_search(self, model, param_grid: Dict[str, List[Any]],
