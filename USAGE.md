@@ -35,10 +35,10 @@ package.
 | `ai` | `LLMIntegration`, `NLPProcessor`, `SentimentAnalyzer`, `NewsProcessor`, `SocialMediaMonitor`, `SentimentFactorCalculator`, `LangChainAgent` | ✅ (needs `ai` extra for full features) |
 | `ml` | `MLModelManager`, `PredictionModel`, `ClassificationModel`, `FeatureEngineer` | ✅ (needs scikit-learn) |
 | `storage` | `DatabaseManager`, `FileStorage`, `CacheManager` | ✅ |
-| `visualization` | `PlotlyChartGenerator` | ✅ (needs plotly) |
+| `visualization` | `PlotlyChartGenerator`, `MatplotlibChartGenerator`, `RealTimeChartManager`, `DashboardChartGenerator` | ✅ |
 | `web` | `APIServer` (FastAPI), `WebDashboard`, `StrategyUI` | ⚠️ needs `web`+`visualization` extras |
 | `dashboard` | `TradingDashboard` (Streamlit), `ChartGenerator`, `DashboardWidgets` | ⚠️ needs `streamlit` |
-| `realtime` | `WebSocketClient`, `RealTimeDataFeed` | ✅ (needs `realtime` extra to run) |
+| `realtime` | `WebSocketClient`, `RealTimeDataFeed`, `TickProcessor`, `MarketDataStream` | ✅ (needs `realtime` extra to run) |
 | `vector_db` | `VectorStore`, `EmbeddingManager`, `DocumentProcessor`, `SearchEngine` | ✅ |
 | `api` | `APIManager`, `APIDocumentation`, `APITesting`, `APIGateway` | ✅ |
 | `utils` | `DataFetchError`, `ProcessingError`, `ValidationError`, `setup_logger` | ✅ |
@@ -301,7 +301,7 @@ The bugs this section originally cataloged have been fixed in the codebase:
 | 9.1 | `processors/__init__.py` imported nonexistent `ProcessedData` → package unimportable. | Imports/`__all__` now use the real class `MarketAnalysis`. |
 | 9.2 | `api`/`vector_db` `__init__` did unguarded imports of files that don't exist → `ModuleNotFoundError`. | Trimmed to the shipped modules (`APIManager`; `VectorStore`). |
 | 9.3 | `matplotlib`/`seaborn`/`scipy` imported at module load by factors/backtest/strategies but not in base deps. | Added to `install_requires` in `setup.py`. |
-| 9.4 | `ml`, `realtime`, `visualization` advertised submodules that don't ship; names silently became `None`. | `__init__`/`__all__` trimmed to what ships. (The missing submodules remain unimplemented — roadmap items, not bugs.) |
+| 9.4 | `ml`, `realtime`, `visualization` advertised submodules that don't ship; names silently became `None`. | `__init__`/`__all__` trimmed to what ships at the time. `realtime`/`visualization` submodules are now implemented (see roadmap below); `ml`'s remain pending. |
 | 9.5 | `BinanceFetcher.get_current_price()`/`get_market_depth()` called by README/`main.py`/examples but missing. | Both added (`get_symbol_ticker` wrapper; `get_order_book` alias). |
 | 9.6 | `from binance.websockets import ...` fails on modern `python-binance` → `BinanceFetcher = None`. | Import now tries `ThreadedWebsocketManager` (≥1.0) with legacy fallback; `start_websocket` supports both APIs. |
 | 9.7 | `YahooFetcher` not exported by `fetchers/__init__` → top-level guarded import killed **all three** fetchers. | Exported (guarded). |
@@ -316,9 +316,10 @@ in across phased PRs:
 - ✅ `vector_db.embedding_manager` / `search_engine` / `document_processor` —
   implemented (§16).
 - ✅ README backtest/strategy/LLM snippet drift — fixed (see README + §7/§8).
+- ✅ `visualization.matplotlib_charts` / `real_time_charts` / `dashboard_charts` —
+  implemented (§13).
+- ✅ `realtime.tick_processor` / `market_data_stream` — implemented (§14).
 - ⏳ `ml.deep_learning` / `ensemble_models` / `model_evaluation` / `optimization`.
-- ⏳ `realtime.tick_processor` / `market_data_stream`.
-- ⏳ `visualization.matplotlib_charts` / `real_time_charts` / `dashboard_charts`.
 - ⏳ C++ engine ↔ Python bindings.
 
 ---
@@ -390,16 +391,40 @@ DataFrames/artifacts to disk.
 
 ## 13. Visualization (`data_service.visualization`) — needs `.[visualization]`
 
+`PlotlyChartGenerator` (interactive) and `MatplotlibChartGenerator` (static
+images) share **7 of Plotly's 8 chart methods** (candlestick, technical
+analysis, factor analysis, portfolio performance, heatmap, 3D surface,
+export) — swap one for the other without changing call sites for those.
+Plotly's 8th method, `create_real_time_chart`, has no Matplotlib
+equivalent; use `RealTimeChartManager` for live/streaming charts instead —
+it buffers ticks into a rolling OHLCV window and works with either
+generator. `DashboardChartGenerator` composes multi-chart layouts.
+
 ```python
-from data_service.visualization import PlotlyChartGenerator
-g = PlotlyChartGenerator()
+from data_service.visualization import PlotlyChartGenerator, MatplotlibChartGenerator
+
+g = PlotlyChartGenerator()          # or MatplotlibChartGenerator() for static images
 fig = g.create_candlestick_chart(ohlcv_df, title="AAPL")
 fig = g.create_technical_analysis_chart(ohlcv_df)      # also factor / portfolio / heatmap / 3d
-g.export_chart(fig, "chart.html", format="html")       # or 'png' (needs kaleido)
+g.export_chart(fig, "chart.html", format="html")       # Plotly: 'html'/'png' (png needs kaleido)
+                                                         # Matplotlib: any savefig format, e.g. 'png'
 ```
 
-(`MatplotlibChartGenerator`, `RealTimeChartManager`, `DashboardChartGenerator`
-are roadmap items — see §9/§20.)
+```python
+from data_service.visualization import RealTimeChartManager, DashboardChartGenerator
+
+# Rolling chart fed by live ticks (async -- register directly on RealTimeDataFeed)
+chart_mgr = RealTimeChartManager(max_points=200, chart_generator=MatplotlibChartGenerator())
+feed.add_tick_callback(chart_mgr.on_tick)          # see §14 for `feed`
+fig = chart_mgr.get_chart("BTCUSD")                # current buffered window
+
+# Multi-chart dashboard layouts
+dash = DashboardChartGenerator(PlotlyChartGenerator())
+figs = dash.build_overview_layout(ohlcv_df, "AAPL")            # candlestick + technicals
+figs = dash.build_strategy_layout({"equity_curve": equity})    # + benchmark/trades if present
+figs = dash.build_factor_layout(factor_df)                     # factor dashboard
+dash.export_layout(figs, prefix="overview", format="html")
+```
 
 ---
 
@@ -409,7 +434,8 @@ are roadmap items — see §9/§20.)
 from data_service.realtime import RealTimeDataFeed, WebSocketClient
 
 feed = RealTimeDataFeed(exchanges=["binance"])
-feed.add_tick_callback(lambda tick: print(tick))
+async def on_tick(tick): print(tick)   # tick callbacks are awaited -- must be async
+feed.add_tick_callback(on_tick)
 feed.set_price_alert("BTCUSDT", alert_type="above", threshold=70000)
 feed.add_alert_callback(lambda a: print("ALERT", a))
 last = feed.get_latest_tick("BTCUSDT")
@@ -417,7 +443,24 @@ last = feed.get_latest_tick("BTCUSDT")
 
 `WebSocketClient(exchange="binance")` is the lower-level client with
 `add_message_handler` / `add_error_handler`. See `demo_charts_websocket.py`.
-(`TickProcessor`, `MarketDataStream` are roadmap items — see §9/§20.)
+
+```python
+from data_service.realtime import TickProcessor, MarketDataStream
+
+# Filter -> aggregate -> normalize pipeline over a live tick stream
+tp = TickProcessor(aggregation_seconds=60)          # 1-minute OHLCV bars
+tp.add_filter(lambda t: t.price > 0)                # drop bad ticks
+tp.add_bar_callback(lambda bar: print(bar.symbol, bar.open, bar.close))
+feed.add_tick_callback(tp.process)                  # async -- drop-in tick callback
+
+# Multi-exchange stream with automatic exponential-backoff reconnect
+stream = MarketDataStream(exchanges=["binance", "kraken"], symbols=["btcusdt"])
+stream.on_tick(lambda msg: print(msg.exchange, msg.symbol, msg.data))
+stream.on_disconnect(lambda exchange: print(f"{exchange} disconnected, reconnecting..."))
+await stream.start()
+...
+await stream.stop()
+```
 
 ---
 
