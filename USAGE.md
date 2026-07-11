@@ -640,12 +640,18 @@ C++: `cd backend/build && ctest` (see §17).
 ## 20. Roadmap (the fixes from §9 are applied)
 
 All §9 fixes have landed; every subpackage imports cleanly and the test suite
-passes (21 passed, 1 intentionally skipped). What remains is net-new feature
-work, in rough value order:
+passes. Of the net-new feature work originally listed here:
 
-1. Implement the advertised-but-missing submodules listed at the end of §9
-   (deep learning / ensemble ML, tick processing, matplotlib & real-time charts,
-   API gateway/docs/testing, embedding manager & search engine).
-2. Update the README code snippets to the real signatures (notably
+1. ✅ The advertised-but-missing submodules (deep learning / ensemble ML, tick
+   processing, matplotlib & real-time charts, API gateway/docs/testing,
+   embedding manager & search engine) are all implemented — see §11/§13/§14/§16
+   and the progress list in §9.
+2. ✅ The README code snippets now match the real signatures (notably
    `run_backtest(data, strategy_func, params)`).
-3. Wire the C++ engine to the Python package (currently independent).
+3. ⏳ **Only remaining item:** wire the C++ engine (`backend/`) to the Python
+   package. Today the two are fully independent (see §1) — no bindings,
+   shared build, or data interchange exist. This would mean either Python
+   bindings for the C++ engine (e.g. pybind11) so `data_service` can call into
+   it, or a defined interchange format (files/sockets/shared DB) so one can
+   drive the other. Nontrivial: it's a different toolchain (CMake/C++) and a
+   design decision (which layer owns execution) rather than a mechanical port.
