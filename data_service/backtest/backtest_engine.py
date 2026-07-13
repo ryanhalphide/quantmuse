@@ -44,8 +44,8 @@ class BacktestEngine:
         # C++ OrderExecutor for a real (if simplified) fill pipeline.
         self._cpp_risk_manager = None
         self._cpp_executor = None
-        self._cpp_portfolio = None
-        
+        self._cpp_executor_started = False
+
     def attach_cpp_risk_manager(self, cpp_risk_manager):
         """Attach a C++ RiskManager (data_service.engine.RiskManager).
 
@@ -112,7 +112,7 @@ class BacktestEngine:
         from data_service import engine
         import time
 
-        if not getattr(self, '_cpp_executor_started', False):
+        if not self._cpp_executor_started:
             self._cpp_executor.start()
             self._cpp_executor_started = True
 
