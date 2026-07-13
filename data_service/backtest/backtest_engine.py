@@ -37,7 +37,101 @@ class BacktestEngine:
         self.trades: List[Trade] = []
         self.equity_curve: List[Dict[str, Any]] = []
         self.logger = logging.getLogger(__name__)
-        
+
+        # Optional C++ engine components (see data_service.engine / USAGE.md
+        # Sec.17). When attached, place_order() consults the C++ RiskManager
+        # before accepting a trade, and routes accepted trades through the
+        # C++ OrderExecutor for a real (if simplified) fill pipeline.
+        self._cpp_risk_manager = None
+        self._cpp_executor = None
+        self._cpp_executor_started = False
+
+    def attach_cpp_risk_manager(self, cpp_risk_manager):
+        """Attach a C++ RiskManager (data_service.engine.RiskManager).
+
+        Once attached, place_order() builds a snapshot Portfolio from the
+        current Python positions/capital and consults
+        cpp_risk_manager.check_order_risk(order, portfolio) before accepting
+        a trade -- a rejection here rejects the Python order too, exactly
+        like the existing insufficient-capital/-position checks.
+        """
+        self._cpp_risk_manager = cpp_risk_manager
+
+    def attach_cpp_executor(self, cpp_executor):
+        """Attach a C++ OrderExecutor (data_service.engine.OrderExecutor).
+
+        Once attached, every trade accepted by place_order() is also
+        submitted to the real C++ threaded execution pipeline (started
+        lazily on first use) and its fill is awaited briefly -- routing
+        paper trades through the actual execution engine, not just
+        simulating one in Python.
+        """
+        self._cpp_executor = cpp_executor
+
+    def _build_cpp_portfolio(self):
+        """Snapshot the current Python positions/capital into a fresh
+        data_service.engine.Portfolio for a C++ risk check."""
+        from data_service import engine
+        portfolio = engine.Portfolio()
+        # Portfolio() starts with a hardcoded cash_ default; align it exactly.
+        portfolio.update_cash(self.current_capital - portfolio.get_cash())
+        for symbol, pos in self.positions.items():
+            portfolio.update_position(symbol, pos.quantity, pos.avg_price)
+        return portfolio
+
+    def _check_cpp_risk(self, symbol: str, side: str, quantity: float, price: float) -> bool:
+        """Consult the attached C++ RiskManager, if any. Returns True when no
+        risk manager is attached (no additional gating) or when it approves."""
+        if self._cpp_risk_manager is None:
+            return True
+        from data_service import engine
+
+        # RiskManager.checkOrderRisk values the portfolio using its own
+        # current_prices_ map (set via update_current_prices), not the price
+        # on the incoming order -- without this, existing positions (and even
+        # the position this order would open) are priced at zero and the
+        # portfolio looks artificially small, rejecting perfectly sound trades.
+        current_prices = {sym: pos.avg_price for sym, pos in self.positions.items()}
+        current_prices[symbol] = price
+        self._cpp_risk_manager.update_current_prices(current_prices)
+
+        cpp_side = engine.OrderSide.BUY if side.lower() == 'buy' else engine.OrderSide.SELL
+        cpp_order = engine.Order(symbol, cpp_side, engine.OrderType.MARKET, quantity)
+        cpp_order.set_price(price)
+        approved = self._cpp_risk_manager.check_order_risk(cpp_order, self._build_cpp_portfolio())
+        if not approved:
+            self.logger.warning(f"C++ RiskManager rejected order: {side} {quantity} {symbol} @ {price}")
+        return approved
+
+    def _submit_to_cpp_executor(self, symbol: str, side: str, quantity: float, price: float):
+        """Route an accepted trade through the attached C++ OrderExecutor, if
+        any. Best-effort: logs a warning on timeout/rejection but does not
+        roll back the Python-side bookkeeping that already accepted the trade."""
+        if self._cpp_executor is None:
+            return
+        from data_service import engine
+        import time
+
+        if not self._cpp_executor_started:
+            self._cpp_executor.start()
+            self._cpp_executor_started = True
+
+        cpp_side = engine.OrderSide.BUY if side.lower() == 'buy' else engine.OrderSide.SELL
+        cpp_order = engine.Order(symbol, cpp_side, engine.OrderType.MARKET, quantity)
+        cpp_order.set_price(price)
+        self._cpp_executor.submit_order(cpp_order)
+
+        order_id = cpp_order.get_order_id()
+        for _ in range(100):  # bounded wait; executeOrder fills near-instantly
+            if self._cpp_executor.get_order_status(order_id) != engine.OrderStatus.PENDING:
+                break
+            time.sleep(0.001)
+        final_status = self._cpp_executor.get_order_status(order_id)
+        if final_status != engine.OrderStatus.FILLED:
+            self.logger.warning(
+                f"C++ OrderExecutor did not report FILLED for {order_id}: {final_status}"
+            )
+
     def reset(self):
         """Reset backtest engine to initial state"""
         self.current_capital = self.initial_capital
@@ -70,6 +164,9 @@ class BacktestEngine:
             # Calculate commission
             commission = abs(quantity * price * self.commission_rate)
             
+            if not self._check_cpp_risk(symbol, side, quantity, price):
+                return False
+
             if side.lower() == 'buy':
                 # Check if we have enough capital
                 total_cost = quantity * price + commission
@@ -128,6 +225,9 @@ class BacktestEngine:
             
             # Update equity curve
             self._update_equity_curve(timestamp)
+
+            # Route the accepted trade through the C++ execution pipeline, if attached
+            self._submit_to_cpp_executor(symbol, side, quantity, price)
             
             self.logger.info(f"Order executed: {side} {quantity} {symbol} @ {price}")
             return True

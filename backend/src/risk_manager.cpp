@@ -1,13 +1,14 @@
 #include "risk_manager.hpp"
 #include <spdlog/spdlog.h>
 #include <algorithm>
+#include <cmath>
 
 namespace trading {
 
 RiskManager::RiskManager(const RiskLimits& limits) : limits_(limits) {}
 
 bool RiskManager::checkOrderRisk(const Order& order, const Portfolio& portfolio) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     
     try {
         // 1. 检查单个持仓限制
@@ -39,9 +40,17 @@ bool RiskManager::checkOrderRisk(const Order& order, const Portfolio& portfolio)
         }
         
         // 5. 检查集中度限制
+        // A SELL reduces (or reverses) the existing position rather than
+        // adding to it -- use a signed delta so a sell order's concentration
+        // is evaluated against the resulting position, not the existing one
+        // plus the sell quantity (which would make every sell look like it
+        // doubles exposure).
         auto position = portfolio.getPosition(order.getSymbol());
-        double new_position_size = (position ? position->getQuantity() : 0) + order.getQuantity();
-        double new_concentration = new_position_size * order.getPrice() / portfolio_value;
+        double existing_quantity = position ? position->getQuantity() : 0;
+        double signed_delta = (order.getSide() == OrderSide::BUY)
+            ? order.getQuantity() : -order.getQuantity();
+        double new_position_size = existing_quantity + signed_delta;
+        double new_concentration = std::abs(new_position_size) * order.getPrice() / portfolio_value;
         
         if (new_concentration > limits_.position_concentration) {
             spdlog::warn("Position concentration limit exceeded for {}", order.getSymbol());
@@ -59,7 +68,7 @@ bool RiskManager::checkOrderRisk(const Order& order, const Portfolio& portfolio)
 }
 
 void RiskManager::updateRiskMetrics(const Portfolio& portfolio) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     
     try {
         // 更新风险指标
@@ -80,12 +89,12 @@ void RiskManager::updateRiskMetrics(const Portfolio& portfolio) {
 }
 
 std::map<std::string, double> RiskManager::getRiskMetrics() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return current_metrics_;
 }
 
 void RiskManager::updateCurrentPrices(const std::map<std::string, double>& prices) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     current_prices_ = prices;
 }
 

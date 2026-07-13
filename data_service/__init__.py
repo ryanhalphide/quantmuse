@@ -65,6 +65,14 @@ except ImportError:
     SignalResult = None
     AlphaVantageSignalProvider = None
 
+# C++ engine bindings (optional -- requires building the quantmuse_engine
+# extension per USAGE.md Sec.17; data_service.engine guards its own imports
+# and exposes AVAILABLE=False when the extension isn't built)
+try:
+    from . import engine
+except ImportError:
+    engine = None
+
 __version__ = "0.1.0"
 
 __all__ = [
