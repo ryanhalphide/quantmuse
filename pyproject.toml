@@ -1,0 +1,14 @@
+[build-system]
+# pip builds this package in an isolated environment by default (even
+# without this file, modern pip/setuptools already do this for plain
+# setup.py projects) -- that isolated env doesn't see anything pip-installed
+# in the outer environment, so setup.py's CMakeBuild step (which imports
+# pybind11 to build the quantmuse_engine extension when QUANTMUSE_BUILD_CPP=1)
+# fails with ModuleNotFoundError unless pybind11 is declared here too.
+# Confirmed via CI: `pip install pybind11 && QUANTMUSE_BUILD_CPP=1 pip install
+# -e ".[cpp]"` in the SAME shell still fails without this, because pip's
+# build_ext step for an editable install runs in its own isolated venv.
+# Everything else about the package (name, deps, extras) stays in setup.py --
+# this file exists only to fix that one build-isolation gap.
+requires = ["setuptools>=61", "pybind11>=2.10"]
+build-backend = "setuptools.build_meta"

@@ -711,6 +711,43 @@ having been exercised end-to-end before this integration) and fixed:
   looked like doubling it and got rejected. Fixed to use a signed BUY/SELL
   delta (regression-tested in both `test_bindings.cpp` and
   `test_engine_integration.py`).
+- **`Portfolio`'s `total_exposure`/`drawdown`/`leverage`/`daily_pnl`/
+  `concentration` fields were never written anywhere** — permanently frozen
+  at their initializers, so `checkOrderRisk`'s drawdown and daily-loss checks
+  were silent no-ops (always "no drawdown"/"no loss") and its leverage check
+  only ever saw the *new* order's exposure, never pre-existing positions.
+  Fixed additively (existing callers/tests unaffected unless they opt in):
+  `Portfolio::markToMarket(current_prices)` now computes all five from real
+  position values vs. equity, and `seedEquityHistory(previous_equity,
+  high_water_mark)` lets a caller carry those forward across calls. `set_cash`
+  was also added so a fresh `Portfolio()` isn't stuck with its hardcoded
+  \$1,000,000 default. `RiskManager::checkOrderRisk` didn't expose *which*
+  check failed (only an `spdlog::warn` log line) — added
+  `getLastRejectionReason()` for that, populated on every rejection branch.
+
+### Advisory risk-check layer for the live paper-trading pipeline
+
+`data_service/execution/` (`check_rebalance_risk`) is a second consumer of
+the same bindings, independent of `BacktestEngine.attach_cpp_*` above: it
+takes today's trend-following target weights, runs
+`paper_trade.rebalance_report`'s proposed trades through a `Portfolio`
+(marked to market, cash/equity history seeded from the real paper-trading
+ledger) and the C++ `RiskManager`, and returns the trades annotated with
+`risk_ok`/`risk_reason` — **advisory only, never submits an order**. It's the
+live-trading counterpart to `attach_cpp_risk_manager`'s backtest-time
+gating, degrading gracefully (via `HAVE_NATIVE_RISK_ENGINE`) when the
+extension isn't built.
+
+```python
+from data_service.execution import check_rebalance_risk
+
+trades = check_rebalance_risk(target_weights, equity, positions, prices)
+print(trades[["action", "trade_shares", "risk_ok", "risk_reason"]])
+```
+
+```bash
+python examples/execution_risk_demo.py --mode long_flat
+```
 
 ---
 
@@ -740,7 +777,17 @@ pytest tests/ -v        # test_binance_fetcher, test_data_processor,
                         # test_integration, test_llm_integration
 ```
 
-C++: `cd backend/build && ctest` (see §17).
+`test_native_bridge.py` and `test_engine_integration.py` skip cleanly
+(`unittest.skipUnless`) unless the `quantmuse_engine` extension is built —
+see §17.
+
+C++: build the specific targets, not the default set (`trading_engine`, the
+old standalone executable, is still unbuildable — see §17):
+
+```bash
+cmake --build backend/build --target quantmuse_engine test_bindings
+cd backend/build && ctest --output-on-failure
+```
 
 ---
 
@@ -755,10 +802,8 @@ passes. Of the net-new feature work originally listed here:
    and the progress list in §9.
 2. ✅ The README code snippets now match the real signatures (notably
    `run_backtest(data, strategy_func, params)`).
-3. ⏳ **Only remaining item:** wire the C++ engine (`backend/`) to the Python
-   package. Today the two are fully independent (see §1) — no bindings,
-   shared build, or data interchange exist. This would mean either Python
-   bindings for the C++ engine (e.g. pybind11) so `data_service` can call into
-   it, or a defined interchange format (files/sockets/shared DB) so one can
-   drive the other. Nontrivial: it's a different toolchain (CMake/C++) and a
-   design decision (which layer owns execution) rather than a mechanical port.
+3. ✅ The C++ engine (`backend/`) is bound to Python via the `quantmuse_engine`
+   pybind11 extension — see §17 for the build steps,
+   `BacktestEngine.attach_cpp_risk_manager`/`attach_cpp_executor` for backtest
+   -time gating/execution, and `data_service.execution.check_rebalance_risk`
+   for the advisory (never-submits-an-order) live paper-trading counterpart.

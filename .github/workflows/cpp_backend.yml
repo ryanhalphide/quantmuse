@@ -1,0 +1,62 @@
+name: C++ backend build + bridge tests
+
+on:
+  push:
+    paths:
+      - "backend/**"
+      - "data_service/execution/**"
+      - "data_service/engine.py"
+      - "setup.py"
+      - "tests/test_native_bridge.py"
+      - "tests/test_engine_integration.py"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "data_service/execution/**"
+      - "data_service/engine.py"
+      - "setup.py"
+      - "tests/test_native_bridge.py"
+      - "tests/test_engine_integration.py"
+  workflow_dispatch: {}
+
+jobs:
+  cpp-build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install C++ deps (spdlog, nlohmann-json, boost-system)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libspdlog-dev nlohmann-json3-dev libboost-system-dev
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pybind11
+      - name: Configure + build quantmuse_engine and test_bindings
+        run: |
+          cmake -B backend/build -DBUILD_PYTHON_MODULE=ON backend \
+                -Dpybind11_DIR="$(python -c 'import pybind11; print(pybind11.get_cmake_dir())')"
+          cmake --build backend/build --target quantmuse_engine test_bindings -j4
+      - name: ctest (test_bindings)
+        run: ctest --test-dir backend/build --output-on-failure
+
+  python-bridge-test:
+    runs-on: ubuntu-latest
+    needs: cpp-build-test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install C++ deps (spdlog, nlohmann-json, boost-system)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libspdlog-dev nlohmann-json3-dev libboost-system-dev
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build the quantmuse_engine extension via setup.py
+        run: |
+          pip install pybind11
+          QUANTMUSE_BUILD_CPP=1 pip install -e ".[cpp,test]"
+      - name: Confirm the native extension actually built
+        run: python -c "from data_service import engine; assert engine.AVAILABLE, 'quantmuse_engine did not build'"
+      - name: Run bridge + engine integration tests
+        run: pytest tests/test_native_bridge.py tests/test_engine_integration.py -v
