@@ -4,6 +4,8 @@
 #include <chrono>
 #include <memory>
 #include <map>
+#include <algorithm>
+#include <cmath>
 
 namespace trading {
 
@@ -134,7 +136,8 @@ public:
 
     double getCash() const { return cash_; }
     void updateCash(double amount) { cash_ += amount; }
-    
+    void setCash(double amount) { cash_ = amount; }
+
     std::shared_ptr<Position> getPosition(const std::string& symbol) const {
         auto it = positions_.find(symbol);
         return (it != positions_.end()) ? it->second : nullptr;
@@ -146,6 +149,43 @@ public:
     double getDailyPnL() const { return daily_pnl_; }
     double getConcentration() const { return concentration_; }
 
+    // Seed the equity history a fresh Portfolio needs before markToMarket()
+    // can compute a meaningful drawdown/daily P&L. Purely additive: nothing
+    // calls this unless a caller opts in, so existing behavior (exposure/
+    // drawdown/leverage/daily_pnl/concentration frozen at their initializers)
+    // is unchanged for any code that doesn't use it.
+    void seedEquityHistory(double previous_equity, double high_water_mark) {
+        previous_equity_ = previous_equity;
+        high_water_mark_ = std::max(high_water_mark, previous_equity);
+    }
+
+    // Recompute exposure/leverage/concentration/drawdown/daily P&L from
+    // actual position market values vs. equity. Without calling this (or
+    // RiskManager::updateRiskMetrics, which calls it), those five fields
+    // stay at their initializers forever -- e.g. getDrawdown()/getDailyPnL()
+    // always read as "no drawdown"/"no loss", silently no-op-ing those
+    // checks in RiskManager::checkOrderRisk.
+    void markToMarket(const std::map<std::string, double>& current_prices) {
+        double equity = getTotalValue(current_prices);
+        double gross = 0.0;
+        double max_position = 0.0;
+        for (const auto& [symbol, position] : positions_) {
+            auto it = current_prices.find(symbol);
+            if (it == current_prices.end()) continue;
+            double mv = std::abs(position->getMarketValue(it->second));
+            gross += mv;
+            max_position = std::max(max_position, mv);
+        }
+        total_exposure_ = gross;
+        leverage_ = equity > 0 ? gross / equity : 0.0;
+        concentration_ = equity > 0 ? max_position / equity : 0.0;
+        if (high_water_mark_ <= 0.0 || equity > high_water_mark_) {
+            high_water_mark_ = equity;
+        }
+        drawdown_ = high_water_mark_ > 0 ? (high_water_mark_ - equity) / high_water_mark_ : 0.0;
+        daily_pnl_ = equity - previous_equity_;
+    }
+
 private:
     double cash_ = 1000000.0;  // 初始资金100万
     std::map<std::string, std::shared_ptr<Position>> positions_;
@@ -154,6 +194,8 @@ private:
     double leverage_ = 1.0;
     double daily_pnl_ = 0.0;
     double concentration_ = 0.0;
+    double previous_equity_ = 0.0;
+    double high_water_mark_ = 0.0;
 };
 
 } // namespace trading 

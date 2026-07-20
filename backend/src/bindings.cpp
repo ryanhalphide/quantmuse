@@ -105,12 +105,16 @@ PYBIND11_MODULE(quantmuse_engine, m) {
         .def("get_total_value", &Portfolio::getTotalValue)
         .def("get_cash", &Portfolio::getCash)
         .def("update_cash", &Portfolio::updateCash)
+        .def("set_cash", &Portfolio::setCash)
         .def("get_position", &Portfolio::getPosition)
         .def("get_total_exposure", &Portfolio::getTotalExposure)
         .def("get_drawdown", &Portfolio::getDrawdown)
         .def("get_leverage", &Portfolio::getLeverage)
         .def("get_daily_pnl", &Portfolio::getDailyPnL)
-        .def("get_concentration", &Portfolio::getConcentration);
+        .def("get_concentration", &Portfolio::getConcentration)
+        .def("seed_equity_history", &Portfolio::seedEquityHistory,
+             py::arg("previous_equity"), py::arg("high_water_mark"))
+        .def("mark_to_market", &Portfolio::markToMarket, py::arg("current_prices"));
 
     // --- RiskManager -------------------------------------------------------
     py::class_<RiskManager::RiskLimits>(m, "RiskLimits")
@@ -126,7 +130,8 @@ PYBIND11_MODULE(quantmuse_engine, m) {
         .def("check_order_risk", &RiskManager::checkOrderRisk)
         .def("update_risk_metrics", &RiskManager::updateRiskMetrics)
         .def("get_risk_metrics", &RiskManager::getRiskMetrics)
-        .def("update_current_prices", &RiskManager::updateCurrentPrices);
+        .def("update_current_prices", &RiskManager::updateCurrentPrices)
+        .def("get_last_rejection_reason", &RiskManager::getLastRejectionReason);
 
     // --- OrderExecutor -------------------------------------------------------
     py::class_<OrderExecutor>(m, "OrderExecutor")
