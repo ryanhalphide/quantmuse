@@ -102,9 +102,16 @@ def check_rebalance_risk(target_weights: pd.Series, equity: float,
 
     ok_col, reason_col = [], []
     for symbol, row in trades.iterrows():
-        if row["action"] == "HOLD" or pd.isna(row["trade_shares"]):
+        if row["action"] == "HOLD":
             ok_col.append(True)
             reason_col.append("")
+            continue
+        if pd.isna(row["trade_shares"]):
+            # rebalance_report() sets trade_shares=NaN when a price is
+            # missing/non-positive -- that trade could not be risk-checked
+            # at all, which is not the same as being approved.
+            ok_col.append(None)
+            reason_col.append("missing_price")
             continue
         side = OrderSide.BUY if row["action"] == "BUY" else OrderSide.SELL
         order = Order(symbol, side, OrderType.MARKET, abs(float(row["trade_shares"])))

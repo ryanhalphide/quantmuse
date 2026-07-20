@@ -160,11 +160,13 @@ public:
     }
 
     // Recompute exposure/leverage/concentration/drawdown/daily P&L from
-    // actual position market values vs. equity. Without calling this (or
-    // RiskManager::updateRiskMetrics, which calls it), those five fields
-    // stay at their initializers forever -- e.g. getDrawdown()/getDailyPnL()
-    // always read as "no drawdown"/"no loss", silently no-op-ing those
-    // checks in RiskManager::checkOrderRisk.
+    // actual position market values vs. equity. The caller must invoke this
+    // directly before RiskManager::checkOrderRisk() -- RiskManager itself
+    // never calls it (RiskManager::updateRiskMetrics only reads these
+    // getters into its own metrics map, it doesn't recompute them). Skip
+    // this call and those five fields stay at their initializers forever --
+    // e.g. getDrawdown()/getDailyPnL() always read as "no drawdown"/"no
+    // loss", silently no-op-ing those checks in checkOrderRisk().
     void markToMarket(const std::map<std::string, double>& current_prices) {
         double equity = getTotalValue(current_prices);
         double gross = 0.0;

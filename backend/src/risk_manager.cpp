@@ -11,18 +11,45 @@ bool RiskManager::checkOrderRisk(const Order& order, const Portfolio& portfolio)
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     
     try {
+        double portfolio_value = portfolio.getTotalValue(current_prices_);
+        if (!std::isfinite(portfolio_value) || portfolio_value <= 0.0) {
+            last_rejection_reason_ = "no_portfolio_value";
+            spdlog::warn("Cannot risk-check {}: portfolio value is {}", order.getSymbol(), portfolio_value);
+            return false;
+        }
+
         // 1. 检查单个持仓限制
         double position_value = order.getQuantity() * order.getPrice();
-        double portfolio_value = portfolio.getTotalValue(current_prices_);
-        
         if (position_value / portfolio_value > limits_.max_position_size) {
             last_rejection_reason_ = "position_size_limit";
             spdlog::warn("Position size limit exceeded for {}", order.getSymbol());
             return false;
         }
 
+        // Signed post-trade position for this symbol -- a SELL reduces (or
+        // reverses) the existing position rather than adding to it. Reused
+        // by both the leverage and concentration checks below so a SELL
+        // that reduces/closes exposure isn't treated as increasing it.
+        auto position = portfolio.getPosition(order.getSymbol());
+        double existing_quantity = position ? position->getQuantity() : 0;
+        double signed_delta = (order.getSide() == OrderSide::BUY)
+            ? order.getQuantity() : -order.getQuantity();
+        double new_position_size = existing_quantity + signed_delta;
+
         // 2. 检查杠杆限制
-        double total_exposure = portfolio.getTotalExposure() + position_value;
+        // Replace this symbol's contribution to gross exposure with its
+        // post-trade value, rather than unconditionally adding the order's
+        // notional -- the latter made every SELL (even one that reduces or
+        // closes a position) look like it increases leverage. The existing
+        // contribution is valued at the same current_prices_ mark used to
+        // compute portfolio.getTotalExposure() in the first place; the
+        // post-trade contribution is valued at the order's own price, like
+        // the position-size check above.
+        auto mark_it = current_prices_.find(order.getSymbol());
+        double mark_price = (mark_it != current_prices_.end()) ? mark_it->second : order.getPrice();
+        double existing_symbol_exposure = std::abs(existing_quantity) * mark_price;
+        double new_symbol_exposure = std::abs(new_position_size) * order.getPrice();
+        double total_exposure = portfolio.getTotalExposure() - existing_symbol_exposure + new_symbol_exposure;
         if (total_exposure / portfolio_value > limits_.max_leverage) {
             last_rejection_reason_ = "leverage_limit";
             spdlog::warn("Leverage limit exceeded");
@@ -42,20 +69,9 @@ bool RiskManager::checkOrderRisk(const Order& order, const Portfolio& portfolio)
             spdlog::warn("Daily loss limit exceeded");
             return false;
         }
-        
+
         // 5. 检查集中度限制
-        // A SELL reduces (or reverses) the existing position rather than
-        // adding to it -- use a signed delta so a sell order's concentration
-        // is evaluated against the resulting position, not the existing one
-        // plus the sell quantity (which would make every sell look like it
-        // doubles exposure).
-        auto position = portfolio.getPosition(order.getSymbol());
-        double existing_quantity = position ? position->getQuantity() : 0;
-        double signed_delta = (order.getSide() == OrderSide::BUY)
-            ? order.getQuantity() : -order.getQuantity();
-        double new_position_size = existing_quantity + signed_delta;
-        double new_concentration = std::abs(new_position_size) * order.getPrice() / portfolio_value;
-        
+        double new_concentration = new_symbol_exposure / portfolio_value;
         if (new_concentration > limits_.position_concentration) {
             last_rejection_reason_ = "concentration_limit";
             spdlog::warn("Position concentration limit exceeded for {}", order.getSymbol());
