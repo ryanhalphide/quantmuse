@@ -295,10 +295,31 @@ class KalshiFetcher:
 
     @staticmethod
     def _normalize_market(m: Dict[str, Any], minutes_to_close: Optional[float]) -> Dict[str, Any]:
-        """Convert a raw market dict to a normalised row (prices in dollars)."""
+        """Convert a raw market dict to a normalised row (prices in dollars).
+
+        Kalshi's API has shipped two quote schemas: originally integer-cent
+        fields (``yes_ask: 34``), now decimal-dollar strings
+        (``yes_ask_dollars: "0.3400"``) with ``*_fp`` volume/size fields.
+        Prefer the new fields and fall back to the old ones so both API
+        generations parse instead of silently yielding all-None quotes.
+        """
         def to_dollars(cents: Optional[Any]) -> Optional[float]:
             return round(cents / 100.0, 4) if cents is not None else None
 
+        def to_float(value: Optional[Any]) -> Optional[float]:
+            try:
+                return None if value is None else float(value)
+            except (TypeError, ValueError):
+                return None
+
+        def price(field: str) -> Optional[float]:
+            dollars = to_float(m.get(f"{field}_dollars"))
+            if dollars is not None:
+                return round(dollars, 4)
+            return to_dollars(m.get(field))
+
+        yes_ask = price("yes_ask")
+        no_ask = price("no_ask")
         return {
             "ticker": m.get("ticker"),
             "event_ticker": m.get("event_ticker"),
@@ -308,16 +329,23 @@ class KalshiFetcher:
             "minutes_to_close": round(minutes_to_close, 2)
             if minutes_to_close is not None
             else None,
-            # Best prices, in dollars (Kalshi quotes in cents 1..99).
-            "yes_bid": to_dollars(m.get("yes_bid")),
-            "yes_ask": to_dollars(m.get("yes_ask")),
-            "no_bid": to_dollars(m.get("no_bid")),
-            "no_ask": to_dollars(m.get("no_ask")),
-            "last_price": to_dollars(m.get("last_price")),
-            "volume": m.get("volume"),
-            "open_interest": m.get("open_interest"),
-            "liquidity": m.get("liquidity"),
-            # Raw cent values retained for the order layer.
-            "yes_ask_cents": m.get("yes_ask"),
-            "no_ask_cents": m.get("no_ask"),
+            "yes_bid": price("yes_bid"),
+            "yes_ask": yes_ask,
+            "no_bid": price("no_bid"),
+            "no_ask": no_ask,
+            "last_price": price("last_price"),
+            "volume": to_float(m.get("volume_fp")) if m.get("volume_fp") is not None else m.get("volume"),
+            "open_interest": to_float(m.get("open_interest_fp"))
+            if m.get("open_interest_fp") is not None
+            else m.get("open_interest"),
+            "liquidity": to_float(m.get("liquidity_dollars"))
+            if m.get("liquidity_dollars") is not None
+            else m.get("liquidity"),
+            # Cent values retained for the order layer (orders are priced in cents).
+            "yes_ask_cents": m.get("yes_ask")
+            if m.get("yes_ask") is not None
+            else (int(round(yes_ask * 100)) if yes_ask is not None else None),
+            "no_ask_cents": m.get("no_ask")
+            if m.get("no_ask") is not None
+            else (int(round(no_ask * 100)) if no_ask is not None else None),
         }
