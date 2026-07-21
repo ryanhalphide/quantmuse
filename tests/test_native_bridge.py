@@ -100,6 +100,32 @@ class TestPortfolioMarkToMarket(unittest.TestCase):
         self.assertTrue(rm.check_order_risk(order, p))
         self.assertEqual(rm.get_last_rejection_reason(), "")
 
+    def test_leverage_stays_non_negative_when_never_marked_to_market(self):
+        """BacktestEngine.attach_cpp_risk_manager's real call path (PR #9)
+        never calls Portfolio.mark_to_market() -- getTotalExposure() stays at
+        its 0.0 default there. A SELL of an existing position must not let
+        total_exposure go negative in that case (which would make the
+        leverage check trivially pass regardless of the rest of the
+        portfolio, masking real over-leverage elsewhere)."""
+        limits = _loose_limits()
+        limits.max_leverage = 1.2
+        rm = engine.RiskManager(limits)
+        p = engine.Portfolio()
+        p.set_cash(-2000.0)
+        p.update_position("SPY", 100, 100.0)
+        prices = {"SPY": 100.0}
+        rm.update_current_prices(prices)
+        # Deliberately NOT calling p.mark_to_market(prices) here.
+
+        order = engine.Order("SPY", engine.OrderSide.SELL, engine.OrderType.MARKET, 20)
+        order.set_price(100.0)
+
+        # Degrades to "just this trade's post-trade notional" (8000) rather
+        # than going negative -- equity is 8000 (cash -2000 + 100*100), so
+        # 8000/8000 = 1.0, under the 1.2 limit: passes, and for the right
+        # reason (not because exposure looked negative).
+        self.assertTrue(rm.check_order_risk(order, p))
+
     def test_zero_portfolio_value_rejected_without_dividing_by_zero(self):
         rm = engine.RiskManager(_loose_limits())
         p = engine.Portfolio()

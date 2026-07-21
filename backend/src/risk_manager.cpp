@@ -49,7 +49,18 @@ bool RiskManager::checkOrderRisk(const Order& order, const Portfolio& portfolio)
         double mark_price = (mark_it != current_prices_.end()) ? mark_it->second : order.getPrice();
         double existing_symbol_exposure = std::abs(existing_quantity) * mark_price;
         double new_symbol_exposure = std::abs(new_position_size) * order.getPrice();
-        double total_exposure = portfolio.getTotalExposure() - existing_symbol_exposure + new_symbol_exposure;
+        // getTotalExposure() is only correct if the caller already called
+        // markToMarket() -- if not (it defaults to/stays 0.0), subtracting a
+        // real existing_symbol_exposure from it would go negative, making a
+        // SELL's leverage ratio look artificially low regardless of the
+        // rest of the portfolio. Bound the base at existing_symbol_exposure
+        // so the subtraction can never underflow: when markToMarket() *was*
+        // called, getTotalExposure() already includes this symbol's
+        // contribution and so is >= existing_symbol_exposure, making this a
+        // no-op; when it wasn't, this degrades to "just this trade's
+        // post-trade notional" instead of going negative.
+        double base_exposure = std::max(portfolio.getTotalExposure(), existing_symbol_exposure);
+        double total_exposure = base_exposure - existing_symbol_exposure + new_symbol_exposure;
         if (total_exposure / portfolio_value > limits_.max_leverage) {
             last_rejection_reason_ = "leverage_limit";
             spdlog::warn("Leverage limit exceeded");
