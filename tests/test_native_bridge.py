@@ -79,6 +79,66 @@ class TestPortfolioMarkToMarket(unittest.TestCase):
         self.assertFalse(rm.check_order_risk(order, p))
         self.assertEqual(rm.get_last_rejection_reason(), "leverage_limit")
 
+    def test_leverage_check_does_not_penalize_a_deleveraging_sell(self):
+        """A SELL that reduces an existing position must lower the leverage
+        check's exposure, not raise it -- the pre-fix formula unconditionally
+        added the order's notional regardless of side, incorrectly blocking
+        trades that reduce risk."""
+        limits = _loose_limits()
+        limits.max_leverage = 1.2
+        rm = engine.RiskManager(limits)
+        p = engine.Portfolio()
+        p.set_cash(-2000.0)
+        p.update_position("SPY", 100, 100.0)
+        prices = {"SPY": 100.0}
+        rm.update_current_prices(prices)
+        p.mark_to_market(prices)  # equity=8000, exposure=10000, leverage=1.25 (already over 1.2)
+
+        order = engine.Order("SPY", engine.OrderSide.SELL, engine.OrderType.MARKET, 20)
+        order.set_price(100.0)  # post-trade exposure: 80*100=8000, 8000/8000=1.0 < 1.2
+
+        self.assertTrue(rm.check_order_risk(order, p))
+        self.assertEqual(rm.get_last_rejection_reason(), "")
+
+    def test_leverage_stays_non_negative_when_never_marked_to_market(self):
+        """BacktestEngine.attach_cpp_risk_manager's real call path (PR #9)
+        never calls Portfolio.mark_to_market() -- getTotalExposure() stays at
+        its 0.0 default there. A SELL of an existing position must not let
+        total_exposure go negative in that case (which would make the
+        leverage check trivially pass regardless of the rest of the
+        portfolio, masking real over-leverage elsewhere)."""
+        limits = _loose_limits()
+        limits.max_leverage = 1.2
+        rm = engine.RiskManager(limits)
+        p = engine.Portfolio()
+        p.set_cash(-2000.0)
+        p.update_position("SPY", 100, 100.0)
+        prices = {"SPY": 100.0}
+        rm.update_current_prices(prices)
+        # Deliberately NOT calling p.mark_to_market(prices) here.
+
+        order = engine.Order("SPY", engine.OrderSide.SELL, engine.OrderType.MARKET, 20)
+        order.set_price(100.0)
+
+        # Degrades to "just this trade's post-trade notional" (8000) rather
+        # than going negative -- equity is 8000 (cash -2000 + 100*100), so
+        # 8000/8000 = 1.0, under the 1.2 limit: passes, and for the right
+        # reason (not because exposure looked negative).
+        self.assertTrue(rm.check_order_risk(order, p))
+
+    def test_zero_portfolio_value_rejected_without_dividing_by_zero(self):
+        rm = engine.RiskManager(_loose_limits())
+        p = engine.Portfolio()
+        p.set_cash(0.0)
+        rm.update_current_prices({})
+        p.mark_to_market({})
+
+        order = engine.Order("AAPL", engine.OrderSide.BUY, engine.OrderType.MARKET, 1)
+        order.set_price(1.0)
+
+        self.assertFalse(rm.check_order_risk(order, p))
+        self.assertEqual(rm.get_last_rejection_reason(), "no_portfolio_value")
+
     def test_drawdown_limit_blocks(self):
         limits = _loose_limits()
         limits.max_drawdown = 0.05
@@ -158,6 +218,23 @@ class TestCheckRebalanceRisk(unittest.TestCase):
         self.assertEqual(trades.loc["SPY", "risk_reason"], "position_size_limit")
         # Still present with its real trade size -- advisory, not filtered out.
         self.assertGreater(trades.loc["SPY", "trade_shares"], 0)
+
+    def test_missing_price_is_not_silently_approved(self):
+        """rebalance_report() sets trade_shares=NaN for a symbol with no
+        price -- that trade couldn't be risk-checked at all, which must not
+        be reported the same as an approved trade."""
+        from data_service.execution import check_rebalance_risk
+
+        weights = pd.Series({"SPY": 0.2, "ZZZZ": 0.1})  # ZZZZ has no price below
+        trades = check_rebalance_risk(
+            weights, equity=10_000.0, positions={}, prices={"SPY": 500.0},
+            ledger_path="/tmp/test_native_bridge_nonexistent_ledger.csv",
+        )
+        self.assertTrue(pd.isna(trades.loc["ZZZZ", "trade_shares"]))
+        self.assertIsNone(trades.loc["ZZZZ", "risk_ok"])
+        self.assertEqual(trades.loc["ZZZZ", "risk_reason"], "missing_price")
+        # Unaffected: the symbol with a real price still gets a real verdict.
+        self.assertIn(trades.loc["SPY", "risk_ok"], (True, False))
 
 
 if __name__ == "__main__":
