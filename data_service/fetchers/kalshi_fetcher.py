@@ -334,10 +334,16 @@ class KalshiFetcher:
             "no_bid": price("no_bid"),
             "no_ask": no_ask,
             "last_price": price("last_price"),
-            "volume": to_float(m.get("volume_fp")) if m.get("volume_fp") is not None else m.get("volume"),
-            "open_interest": to_float(m.get("open_interest_fp"))
-            if m.get("open_interest_fp") is not None
-            else m.get("open_interest"),
+            "volume": (
+                to_float(m.get("volume_fp"))
+                if to_float(m.get("volume_fp")) is not None
+                else m.get("volume")
+            ),
+            "open_interest": (
+                to_float(m.get("open_interest_fp"))
+                if to_float(m.get("open_interest_fp")) is not None
+                else m.get("open_interest")
+            ),
             "liquidity": to_float(m.get("liquidity_dollars"))
             if m.get("liquidity_dollars") is not None
             else m.get("liquidity"),
