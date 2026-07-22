@@ -130,5 +130,71 @@ class TestKalshiArbitrage(unittest.TestCase):
         self.assertLessEqual(opp.total_cost, 10.0)
 
 
+class TestNormalizeMarketSchemas(unittest.TestCase):
+    """Kalshi has shipped two market-quote schemas; both must parse.
+
+    Regression test: the API migrated from integer-cent fields
+    (yes_ask: 34) to decimal-dollar strings (yes_ask_dollars: "0.3400"),
+    which the old parser silently turned into all-None quotes -- leaving
+    the arbitrage scanner blind while appearing to work.
+    """
+
+    def test_new_dollars_schema_parses(self):
+        from data_service.fetchers.kalshi_fetcher import KalshiFetcher
+
+        row = KalshiFetcher._normalize_market(
+            {
+                "ticker": "KXBTC-TEST",
+                "yes_bid_dollars": "0.3300",
+                "yes_ask_dollars": "0.3400",
+                "no_bid_dollars": "0.6500",
+                "no_ask_dollars": "0.6600",
+                "last_price_dollars": "0.3350",
+                "volume_fp": "128.00",
+                "open_interest_fp": "12.00",
+                "liquidity_dollars": "455.0000",
+            },
+            minutes_to_close=7.5,
+        )
+        self.assertEqual(row["yes_ask"], 0.34)
+        self.assertEqual(row["no_ask"], 0.66)
+        self.assertEqual(row["yes_bid"], 0.33)
+        self.assertEqual(row["last_price"], 0.335)
+        self.assertEqual(row["volume"], 128.0)
+        self.assertEqual(row["liquidity"], 455.0)
+        # Cent values derived for the order layer.
+        self.assertEqual(row["yes_ask_cents"], 34)
+        self.assertEqual(row["no_ask_cents"], 66)
+
+    def test_legacy_cents_schema_still_parses(self):
+        from data_service.fetchers.kalshi_fetcher import KalshiFetcher
+
+        row = KalshiFetcher._normalize_market(
+            {
+                "ticker": "KXBTC-TEST",
+                "yes_bid": 33,
+                "yes_ask": 34,
+                "no_bid": 65,
+                "no_ask": 66,
+                "last_price": 33,
+                "volume": 128,
+            },
+            minutes_to_close=7.5,
+        )
+        self.assertEqual(row["yes_ask"], 0.34)
+        self.assertEqual(row["no_ask"], 0.66)
+        self.assertEqual(row["yes_ask_cents"], 34)
+
+    def test_unquoted_market_yields_none_not_crash(self):
+        from data_service.fetchers.kalshi_fetcher import KalshiFetcher
+
+        row = KalshiFetcher._normalize_market(
+            {"ticker": "KXMVE-COMBO"}, minutes_to_close=3.0
+        )
+        self.assertIsNone(row["yes_ask"])
+        self.assertIsNone(row["no_ask"])
+        self.assertIsNone(row["yes_ask_cents"])
+
+
 if __name__ == "__main__":
     unittest.main()
