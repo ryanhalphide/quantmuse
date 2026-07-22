@@ -344,9 +344,11 @@ class KalshiFetcher:
                 if to_float(m.get("open_interest_fp")) is not None
                 else m.get("open_interest")
             ),
-            "liquidity": to_float(m.get("liquidity_dollars"))
-            if m.get("liquidity_dollars") is not None
-            else m.get("liquidity"),
+            "liquidity": (
+                to_float(m.get("liquidity_dollars"))
+                if to_float(m.get("liquidity_dollars")) is not None
+                else m.get("liquidity")
+            ),
             # Cent values retained for the order layer (orders are priced in cents).
             "yes_ask_cents": m.get("yes_ask")
             if m.get("yes_ask") is not None
